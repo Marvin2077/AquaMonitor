@@ -7,7 +7,7 @@
 #include "ads124s08_drv.h"  // 通用驱动层
 #include "ad5941_board_glue.h"
 #include "ad5941_drv.h"
-
+#include "cond_service.h"
 
 /* ====== 共用 SPI 线 ====== */
 static const int PIN_SCLK = 14;
@@ -24,14 +24,12 @@ static const int CS_AD5941 = 26; // 假设 AD5941 的 CS 连接到 GPIO 26
 static const int RESET_AD5941 = 25; // 假设 RESET 连接到 GPIO 25 (如果连接了)
 // static const int INT_AD5941 = 34;   // 假设中断输出连接到 GPIO 34 (仅输入引脚)
 
-
-
 // 定义外部参考电压值，用于后续电压转换计算
 // 请根据您实际连接到 REFP0/REFN0 的参考电压修改此值
 const double V_REF = 1.57; 
 
-// 创建一个 ADS124S08 驱动对象（此时还未初始化）
 // 这里先声明，具体初始化在 setup() 中完成
+// 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* adc = nullptr;
 // 创建 AD5941 驱动对象指针
 AD5941_Drv* afe = nullptr;
@@ -41,18 +39,38 @@ void setup() {
   delay(1000);
   Serial.println("--- ADS124S08 PT1000 Demo ---");
   Serial.printf("Using theoretical V_REF = %.2fV\n", V_REF);
-
   SpiHAL::beginBus(PIN_SCLK, PIN_MISO, PIN_MOSI);
   Serial.println("SPI bus initialized.");
-// --- 初始化 AD5941 ---
-    Serial.println("Initializing AD5941...");
-  static SpiDevice ads_spi_dev(CS_ADS, 4000000, MSBFIRST, SPI_MODE1);
 
+// --- 初始化 ADS124S08 ---
+    Serial.println("Initializing ADS124S08...");
+  static SpiDevice ads_spi_dev(CS_ADS, 4000000, MSBFIRST, SPI_MODE1);
+  // 定义 ADS124S08 的 Glue 配置
   AdsGlueConfig ads_cfg = {
     .spi = &ads_spi_dev,
     .pin_drdy = DRDY_ADS,
     .pin_reset = RESET_ADS
   };
+    Serial.println("Making ADS HAL...");
+  ADS124S08_Drv::Hal ads_hal = BoardGlue::make_ads_hal(ads_cfg);
+    // 创建ADS124S08驱动实例
+  adc = new ADS124S08_Drv(ads_hal);
+  Serial.println("ADS Driver instance created.");
+  Serial.println("Configuring ADS124S08...");
+  if (!adc->defaultConfig()) {
+    Serial.println("!!! ADS124S08 configuration FAILED! Halting. !!!");
+    while (1) { delay(1000); }
+  }
+  Serial.println("ADS124S08 configuration successful.");
+
+  Serial.println("ADC started. Waiting for data...");
+  Serial.println("----------------------------------------");
+
+  // --- 完成ADS124S08的初始化 --- //
+
+
+  // --- 初始化 AD5941 --- //
+      Serial.println("Initializing AD5941...");
     static SpiDevice ad5941_spi_dev(CS_AD5941, 4000000, MSBFIRST, SPI_MODE0);
   // 定义 AD5941 的 Glue 配置
     Ad5941GlueConfig ad5941_cfg = {
@@ -60,17 +78,11 @@ void setup() {
         // .pin_reset = RESET_AD5941, // 如果使用硬件复位
         // .pin_interrupt = INT_AD5941 // 如果使用中断
     };
-
-  Serial.println("Making ADS HAL...");
-  ADS124S08_Drv::Hal ads_hal = BoardGlue::make_ads_hal(ads_cfg);
   // 创建 AD5941 的 HAL
     AD5941_Drv::Hal ad5941_hal = Ad5941BoardGlue::make_ad5941_hal(ad5941_cfg);
-
-  // 创建驱动实例
+  // 创建 AD5941 驱动实例
   afe = new AD5941_Drv(ad5941_hal);
-  adc = new ADS124S08_Drv(ads_hal);
-  Serial.println("ADS Driver instance created.");
-  
+
   // 执行初始化 (包括强制序列)
   
     if (!afe->begin()) {
@@ -86,15 +98,8 @@ void setup() {
    } else {
         Serial.println("  Failed to read Chip ID!");
    }
-  Serial.println("Configuring ADS124S08...");
-  if (!adc->defaultConfig()) {
-    Serial.println("!!! ADS124S08 configuration FAILED! Halting. !!!");
-    while (1) { delay(1000); }
-  }
-  Serial.println("ADS124S08 configuration successful.");
-
-  Serial.println("ADC started. Waiting for data...");
-  Serial.println("----------------------------------------");
+  // --- 完成AD5941 --- //
+  
 }
 
 void loop() {

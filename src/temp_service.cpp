@@ -50,3 +50,75 @@ bool TempService::readPT1000Once(double& tempC, double* Rrx_out) {
   tempC = pt1000_R_to_T(Rx);
   return true;
 }
+
+bool TempService::collectCalibPoint(double t_true, int samples, CalibPoint& out) {
+  if (samples <= 0) return false;
+  double sum = 0.0;
+  int okcnt = 0;
+  for (int i = 0; i < samples; ++i) {
+    double t_meas = 0.0;
+    if (readPT1000Once(t_meas, nullptr)) {
+      sum += t_meas;
+      ++okcnt;
+    } else {
+      // 轻微等待，避免忙等
+      delay(10);
+    }
+  }
+  if (okcnt == 0) return false;
+  out.t_true = t_true;
+  out.t_meas = sum / okcnt;
+  return true;
+}
+
+static inline bool solve3x3(double A[3][3], double y[3], double x[3]) {
+  // 简单的 3x3 高斯消元（无主元选取，足够用于温度校准这类良态问题）
+  for (int i = 0; i < 3; ++i) {
+    double pivot = A[i][i];
+    if (fabs(pivot) < 1e-12) return false;
+    double inv = 1.0 / pivot;
+    for (int j = i; j < 3; ++j) A[i][j] *= inv;
+    y[i] *= inv;
+    for (int r = 0; r < 3; ++r) if (r != i) {
+      double f = A[r][i];
+      for (int c = i; c < 3; ++c) A[r][c] -= f * A[i][c];
+      y[r] -= f * y[i];
+    }
+  }
+  x[0] = y[0]; x[1] = y[1]; x[2] = y[2];
+  return true;
+}
+
+bool TempService::fitThreePoint(const CalibPoint& p1,
+                                const CalibPoint& p2,
+                                const CalibPoint& p3,
+                                CalibCoeff& coeff) {
+  // 构建方程: [t1^2 t1 1][a b c]^T = T1_true
+  double A[3][3] = {
+    { p1.t_meas*p1.t_meas, p1.t_meas, 1.0 },
+    { p2.t_meas*p2.t_meas, p2.t_meas, 1.0 },
+    { p3.t_meas*p3.t_meas, p3.t_meas, 1.0 }
+  };
+  double y[3] = { p1.t_true, p2.t_true, p3.t_true };
+  double x[3] = { 0,0,0 };
+  if (!solve3x3(A, y, x)) return false;
+  coeff.a = x[0]; coeff.b = x[1]; coeff.c = x[2];
+  coeff.valid = true;
+  return true;
+}
+
+bool TempService::runThreePointCalibration(double t1_true, double t2_true, double t3_true,
+                                           int samples_each, CalibCoeff& out) {
+  CalibPoint p1{}, p2{}, p3{};
+  if (!collectCalibPoint(t1_true, samples_each, p1)) return false;
+  if (!collectCalibPoint(t2_true, samples_each, p2)) return false;
+  if (!collectCalibPoint(t3_true, samples_each, p3)) return false;
+  if (!fitThreePoint(p1, p2, p3, out)) return false;
+  calib_ = out;
+  return true;
+}
+
+double TempService::applyCalib(double t_meas) const {
+  if (!calib_.valid) return t_meas; // 未校准则直通
+  return calib_.a*t_meas*t_meas + calib_.b*t_meas + calib_.c;
+}
