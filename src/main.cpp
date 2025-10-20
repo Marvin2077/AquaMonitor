@@ -70,13 +70,6 @@ void setup() {
   Serial.println("----------------------------------------");
 
   // --- 完成ADS124S08的初始化 --- //
-  // 初始化温度校准程序
-  TempService::Config tcfg;
-  tcfg.Rref_ohm = 1000.0; // 和你硬件/配置一致
-  tcfg.pga_gain = 2;      // 与 defaultConfig 的增益保持一致
-  static TempService tempSvc(*adc, tcfg);
-  g_tempSvc = &tempSvc;
-  // 完成温度校准程序初始化
 
   // --- 初始化 AD5941 --- //
       Serial.println("Initializing AD5941...");
@@ -109,6 +102,18 @@ void setup() {
    }
   // --- 完成AD5941 --- //
 
+    // 初始化温度校准程序
+  TempService::Config tcfg;
+  tcfg.Rref_ohm = V_REF / 0.0005;  // 1.57V / 500uA ≈ 3140 Ω
+  tcfg.pga_gain = 2;      // 与 defaultConfig 的增益保持一致
+  static TempService tempSvc(*adc, tcfg);
+  g_tempSvc = &tempSvc;
+  Serial.println("[Cal] Ready for 3-point calibration.");
+  Serial.println("Put probe into point #1 (e.g., 0.0C), then type 'y' + Enter.");
+  Serial.println("Tip: You can type a number (e.g., 23.7) to set the true temperature, then type 'y' to sample.");
+
+  
+  // 完成温度校准程序初始化
 }
 
 enum class CalState {
@@ -116,7 +121,12 @@ enum class CalState {
 };
 
 static CalState cal_state = CalState::WAIT1;
+static double t1_true = 0.0;   // 缺省 0℃
+static double t2_true = 25.0;  // 缺省 25℃
+static double t3_true = 50.0;  // 缺省 50℃
+
 static TempService::CalibCoeff g_coeff;
+static TempService::CalibPoint s_p1, s_p2, s_p3;
 static bool cal_once = false;
 
 void loop() {
@@ -127,13 +137,21 @@ if (!cal_once && g_tempSvc) {
     switch (cal_state) {
       case CalState::WAIT1:
         if (Serial.available()) {
-          if (Serial.read() == 'y') { cal_state = CalState::DO1; Serial.println("[Cal] Sampling point#1..."); }
+          String s = Serial.readStringUntil('\n'); // 读到回车
+          s.trim();
+          if (s.equalsIgnoreCase("y")) {
+            cal_state = CalState::DO1;
+            Serial.printf("[Cal] Sampling point#1 at T_true=%.3fC ...\n", t1_true);
+          } else if (s.length()) {
+            t1_true = s.toFloat(); // 输入数字即更新“真实温度”
+            Serial.printf("[Cal] Set point#1 T_true=%.3fC. Type 'y' to sample.\n", t1_true);
+          }
         }
         return;
       case CalState::DO1: {
         TempService::CalibPoint p; 
-        if (g_tempSvc->collectCalibPoint(0.0 /*示例：0°C*/, 64, p)) {
-          static TempService::CalibPoint s_p1 = p;
+        if (g_tempSvc->collectCalibPoint(t1_true, 64, p))  {
+          s_p1 = p;
           Serial.printf("[Cal] p1: true=%.3f, meas=%.3f\n", p.t_true, p.t_meas);
           Serial.println("Put probe into point#2 (e.g., room 25.0C), then 'y'.");
           cal_state = CalState::WAIT2;
@@ -145,13 +163,21 @@ if (!cal_once && g_tempSvc) {
       }
       case CalState::WAIT2:
         if (Serial.available()) {
-          if (Serial.read() == 'y') { cal_state = CalState::DO2; Serial.println("[Cal] Sampling point#2..."); }
+          String s = Serial.readStringUntil('\n');
+          s.trim();
+          if (s.equalsIgnoreCase("y")) {
+            cal_state = CalState::DO2;
+            Serial.printf("[Cal] Sampling point#2 at T_true=%.3fC ...\n", t2_true);
+          } else if (s.length()) {
+            t2_true = s.toFloat();
+            Serial.printf("[Cal] Set point#2 T_true=%.3fC. Type 'y' to sample.\n", t2_true);
+          }
         }
         return;
       case CalState::DO2: {
-        static TempService::CalibPoint s_p1, s_p2;
+        
         TempService::CalibPoint p; 
-        if (g_tempSvc->collectCalibPoint(25.0 /*示例*/, 64, p)) {
+        if (g_tempSvc->collectCalibPoint(t2_true, 64, p)) {
           s_p2 = p;
           Serial.printf("[Cal] p2: true=%.3f, meas=%.3f\n", p.t_true, p.t_meas);
           Serial.println("Put probe into point#3 (e.g., warm 50.0C), then 'y'.");
@@ -164,13 +190,21 @@ if (!cal_once && g_tempSvc) {
       }
       case CalState::WAIT3:
         if (Serial.available()) {
-          if (Serial.read() == 'y') { cal_state = CalState::DO3; Serial.println("[Cal] Sampling point#3..."); }
+          String s = Serial.readStringUntil('\n');
+          s.trim();
+          if (s.equalsIgnoreCase("y")) {
+            cal_state = CalState::DO3;
+            Serial.printf("[Cal] Sampling point#3 at T_true=%.3fC ...\n", t3_true);
+          } else if (s.length()) {
+            t3_true = s.toFloat();
+            Serial.printf("[Cal] Set point#3 T_true=%.3fC. Type 'y' to sample.\n", t3_true);
+          }
         }
         return;
       case CalState::DO3: {
-        static TempService::CalibPoint s_p1, s_p2, s_p3;
+        
         TempService::CalibPoint p; 
-        if (g_tempSvc->collectCalibPoint(50.0 /*示例*/, 64, p)) {
+        if (g_tempSvc->collectCalibPoint(t3_true, 64, p)) {
           s_p3 = p;
           if (TempService::fitThreePoint(s_p1, s_p2, s_p3, g_coeff)) {
             g_tempSvc->setCalib(g_coeff);
@@ -189,6 +223,8 @@ if (!cal_once && g_tempSvc) {
       default: break;
     }
   }
+
+
   if (adc->waitDRDY(100)) {
     int32_t raw_value;
     
@@ -213,7 +249,10 @@ if (!cal_once && g_tempSvc) {
       Serial.print(" V\t | R_RTD: ");
       Serial.print(resistance, 3);
       Serial.println(" Ohm");
-      
+
+      double t_meas = TempService::pt1000_R_to_T(resistance);
+      double t_cal  = g_tempSvc ? g_tempSvc->applyCalib(t_meas) : t_meas;
+      Serial.printf("T_meas: %.3f C | T_cal: %.3f C\n", t_meas, t_cal);
     } else {
       Serial.println("Failed to read data from ADS124S08.");
     }
