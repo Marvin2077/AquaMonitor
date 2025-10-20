@@ -206,7 +206,9 @@ public:
      * @param // ... 可能需要更多参数，例如电极连接配置、PGA增益等
      * @return true 配置成功, false 失败
      */
-    bool configureConductivityMeasurement(float excitationFreq, float excitationAmpPeak, uint32_t rtiaOhms /* ... */);
+    bool configureConductivityMeasurement(float f_hz,uint16_t wg_amp_code,uint32_t dft_n,bool use_high_bw);
+                                      
+                                      
 
     /**
      * @brief 启动一次测量 (通常是启动 ADC 转换)
@@ -245,5 +247,8 @@ private:
 
     Hal hal_; // 保存 HAL 回调函数指针
 };
+
+
+
 
 #endif // AD5941_DRV_H

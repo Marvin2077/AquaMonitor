@@ -251,40 +251,14 @@ bool AD5941_Drv::initializeChipMandatorySequence() {
 
 // ===== 高层函数占位符 =====
 
-bool AD5941_Drv::configureConductivityMeasurement(float excitationFreq, float excitationAmpPeak, uint32_t rtiaOhms /* ... */) {
-    // TODO: 实现电导率测量的详细配置
-    // 1. 配置时钟 & 电源模式 (PMBW, ...)
-    // 2. 配置波形发生器 (WGCON, WGFCW, WGAMPLITUDE, ...)
-    // 3. 配置 HSDAC (HSDACCON, ...)
-    // 4. 配置 HSTIA (HSRTIACON, HSTIACON, DEORESCON if needed)
-    // 5. 配置开关矩阵 (SWCON or xSWFULLCON) - !! 非常关键 !!
-    // 6. 配置 ADC (ADCCON, ADCFILTERCON)
-    // 7. 配置 DFT (DFTCON)
-    // 8. 使能所需模块 (AFECON)
-    return false; // 暂未实现
-}
-
 bool AD5941_Drv::startMeasurement() {
-    // TODO: 启动 ADC 转换 (写 AFECON 的 ADCCONVEN 位)
-    uint32_t afecon_val;
-    if (!readRegister(Reg::AFECON, afecon_val)) return false;
-    afecon_val |= AfeConBits::ADCCONVEN; // 置位启动转换
-    return writeRegister(Reg::AFECON, afecon_val);
-}
-
-bool AD5941_Drv::isMeasurementReady() {
-    // TODO: 检查测量完成标志，例如 DFT 完成中断标志
-    uint32_t flag_val;
-    // 假设中断路由到 INTCFLAG0
-    if (!readRegister(Reg::INTCFLAG0, flag_val)) return false;
-    if (flag_val & (1 << 1)) { // 检查 FLAG1: DFT result IRQ status
-        // 清除中断标志
-        if (!writeRegister(Reg::INTCCLR, (1 << 1))) { // 写入 1 清除对应位
-           // 清除失败处理 (可选)
-        }
-        return true;
-    }
-    return false;
+    uint32_t afecon = 0;
+    if (!readRegister(Reg::AFECON, afecon)) return false;
+    // 保险：先确保 ADC 上电
+    afecon |= AfeConBits::ADCEN;
+    // 启动转换
+    afecon |= AfeConBits::ADCCONVEN;
+    return writeRegister(Reg::AFECON, afecon);
 }
 
 bool AD5941_Drv::readImpedanceData(int32_t& realPartRaw, int32_t& imaginaryPartRaw) {
@@ -306,4 +280,82 @@ bool AD5941_Drv::readImpedanceData(int32_t& realPartRaw, int32_t& imaginaryPartR
     }
 
     return true;
+}
+
+// ad5941_drv.cpp
+
+bool AD5941_Drv::configureConductivityMeasurement(float f_hz,
+                                                   uint16_t wg_amp_code,   // WGAMPLITUDE 的 11-bit 原码
+                                                   uint32_t dft_n,         // 1024/2048/4096/8192 等
+                                                   bool use_high_bw)       // 频率>80kHz 设 true
+{
+  // 0) 频带/功耗：<80kHz 低功率；≥80kHz 置高功率（PMBW.SYSHS=1），并选合适 SYSBW 截止
+  //    这里：低功率 0x0000；高功率举例 0x000D（SYSHS=1，SYSBW=50k/100k/250k自动随 WG）:contentReference[oaicite:6]{index=6} :contentReference[oaicite:7]{index=7}
+  if (!writeRegister(Reg::PMBW, use_high_bw ? 0x000D : 0x0000)) return false;
+
+  // 1) 波形发生器参数：先写 WGFCW/WGPHASE/WGOFFSET/WGAMPLITUDE，再开 TYPESEL 与 AFECON.WAVEGENEN
+  //    f = 16MHz * FCW / 2^30；WGAMPLITUDE 为 11-bit 幅度码（受 HSDAC 增益/衰减影响）:contentReference[oaicite:8]{index=8} :contentReference[oaicite:9]{index=9}
+  const double fACLK = 16e6;
+  uint32_t fcw = (uint32_t)((f_hz * (1u<<30)) / fACLK);
+  if (fcw > 0xFFFFFF) fcw = 0xFFFFFF;
+  if (!writeRegister(Reg::WGFCW, fcw)) return false;
+  if (!writeRegister(Reg::WGPHASE, 0u)) return false;
+  if (!writeRegister(Reg::WGOFFSET, 0u)) return false;
+  if (!writeRegister(Reg::WGAMPLITUDE, (uint32_t)(wg_amp_code & 0x7FF))) return false;
+
+  // 2) 选择正弦模式（WGCON.TYPESEL=10b）
+  uint32_t wgcon = 0;
+  if (!readRegister(Reg::WGCON, wgcon)) return false;
+  wgcon &= ~((uint32_t)0x3 << 1);
+  wgcon |= (0x2u << 1); // TYPESEL=10: Sinusoid
+  if (!writeRegister(Reg::WGCON, wgcon)) return false;  // :contentReference[oaicite:10]{index=10}
+
+  // 3) 连接开关矩阵：DE0→HSTIA-（T10=1）；确保 T9=0；写完 xSWFULLCON 后需置 SWCON.SWSOURCESEL=1 生效。:contentReference[oaicite:11]{index=11}
+  uint32_t tsw = 0;
+  tsw |= (1u<<9);  // T10 closed
+  tsw |= (0u<<8);  // T9 open
+  if (!writeRegister(Reg::TSWFULLCON, tsw)) return false;
+  uint32_t swcon = 0;
+  if (!readRegister(Reg::SWCON, swcon)) return false;
+  swcon |= (1u<<0); // SWSOURCESEL=1: 使用 xSWFULLCON 的设置
+  if (!writeRegister(Reg::SWCON, swcon)) return false;
+
+  // 4) 使能 HSDAC（AFECON.DACEN=1），但先别开 WAVEGENEN，最后统一开；ADC 先上电（ADCEN=1）。:contentReference[oaicite:12]{index=12}
+  uint32_t afecon = 0;
+  if (!readRegister(Reg::AFECON, afecon)) return false;
+  afecon |= (1u<<6); // DACEN
+  afecon |= (1u<<7); // ADCEN
+  if (!writeRegister(Reg::AFECON, afecon)) return false;
+
+  // 5) ADC 滤波 + DFT：DFT 输入选 SINC3 输出；根据 f_hz 设置 OSR 和 DFT 长度 N，建议加 Hanning 窗。:contentReference[oaicite:13]{index=13}
+  //    下面给一组保守设置：SINC3 OSR=4、SINC2 OSR=22（举例），请按你的采样率需要细调。
+  //    这里只示范把 DFTNUM/HANNING/输入源配置进去；位定义随你头文件映射。
+  uint32_t adcf = 0;
+  if (!readRegister(Reg::ADCFILTERCON, adcf)) return false;
+  // 清/设 OSR 位（这里不展开位域，保持你工程中的位定义）
+  // adcf = (adcf & ~MASK) | NEWVAL;
+  if (!writeRegister(Reg::ADCFILTERCON, adcf)) return false;
+
+  uint32_t dftcon = 0;
+  // 例：DFT 开启、输入=SINC3、HANNING=1、N= dft_n（映射到寄存器的编码由你在头文件里定义）
+  // dftcon = (DFTEN=1) | (DFTINSEL=SINC3) | (HANNING=1) | (DFTNUM编码)
+  if (!writeRegister(Reg::DFTCON, dftcon)) return false;
+
+  // 6) 最后开波形发生器输出（AFECON.WAVEGENEN=1），并启动 ADC 转换（ADCCONVEN=1）。:contentReference[oaicite:14]{index=14} :contentReference[oaicite:15]{index=15}
+  if (!readRegister(Reg::AFECON, afecon)) return false;
+  afecon |= (1u<<0);  // WAVEGENEN=1
+  afecon |= (1u<<8);  // ADCCONVEN=1
+  if (!writeRegister(Reg::AFECON, afecon)) return false;
+
+  return true;
+}
+
+bool AD5941_Drv::isMeasurementReady() {
+  uint32_t flag = 0;
+  if (!readRegister(Reg::INTCFLAG0, flag)) return false;
+  if (flag & (1u<<1)) { // FLAG1: DFT result ready
+    (void)writeRegister(Reg::INTCCLR, (1u<<1)); // 写 1 清除
+    return true;
+  }
+  return false;
 }
