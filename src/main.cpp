@@ -8,6 +8,7 @@
 #include "ad5941_board_glue.h"
 #include "ad5941_drv.h"
 #include "cond_service.h"
+#include "temp_service.h" 
 
 /* ====== 共用 SPI 线 ====== */
 static const int PIN_SCLK = 14;
@@ -33,6 +34,8 @@ const double V_REF = 1.57;
 ADS124S08_Drv* adc = nullptr;
 // 创建 AD5941 驱动对象指针
 AD5941_Drv* afe = nullptr;
+//创建 Temp Service 对象指针
+TempService* g_tempSvc = nullptr;
 
 void setup() {
   Serial.begin(115200);
@@ -41,8 +44,8 @@ void setup() {
   Serial.printf("Using theoretical V_REF = %.2fV\n", V_REF);
   SpiHAL::beginBus(PIN_SCLK, PIN_MISO, PIN_MOSI);
   Serial.println("SPI bus initialized.");
-
-// --- 初始化 ADS124S08 ---
+  
+   // --- 初始化 ADS124S08 --- //
     Serial.println("Initializing ADS124S08...");
   static SpiDevice ads_spi_dev(CS_ADS, 4000000, MSBFIRST, SPI_MODE1);
   // 定义 ADS124S08 的 Glue 配置
@@ -67,7 +70,13 @@ void setup() {
   Serial.println("----------------------------------------");
 
   // --- 完成ADS124S08的初始化 --- //
-
+  // 初始化温度校准程序
+  TempService::Config tcfg;
+  tcfg.Rref_ohm = 1000.0; // 和你硬件/配置一致
+  tcfg.pga_gain = 2;      // 与 defaultConfig 的增益保持一致
+  static TempService tempSvc(*adc, tcfg);
+  g_tempSvc = &tempSvc;
+  // 完成温度校准程序初始化
 
   // --- 初始化 AD5941 --- //
       Serial.println("Initializing AD5941...");
@@ -99,14 +108,87 @@ void setup() {
         Serial.println("  Failed to read Chip ID!");
    }
   // --- 完成AD5941 --- //
-  
+
 }
+
+enum class CalState {
+  IDLE, WAIT1, DO1, WAIT2, DO2, WAIT3, DO3, FIT, DONE
+};
+
+static CalState cal_state = CalState::WAIT1;
+static TempService::CalibCoeff g_coeff;
+static bool cal_once = false;
 
 void loop() {
   if (!adc) {
     return;
   }
-
+if (!cal_once && g_tempSvc) {
+    switch (cal_state) {
+      case CalState::WAIT1:
+        if (Serial.available()) {
+          if (Serial.read() == 'y') { cal_state = CalState::DO1; Serial.println("[Cal] Sampling point#1..."); }
+        }
+        return;
+      case CalState::DO1: {
+        TempService::CalibPoint p; 
+        if (g_tempSvc->collectCalibPoint(0.0 /*示例：0°C*/, 64, p)) {
+          static TempService::CalibPoint s_p1 = p;
+          Serial.printf("[Cal] p1: true=%.3f, meas=%.3f\n", p.t_true, p.t_meas);
+          Serial.println("Put probe into point#2 (e.g., room 25.0C), then 'y'.");
+          cal_state = CalState::WAIT2;
+        } else {
+          Serial.println("[Cal] p1 failed, retry: 'y'");
+          cal_state = CalState::WAIT1;
+        }
+        return;
+      }
+      case CalState::WAIT2:
+        if (Serial.available()) {
+          if (Serial.read() == 'y') { cal_state = CalState::DO2; Serial.println("[Cal] Sampling point#2..."); }
+        }
+        return;
+      case CalState::DO2: {
+        static TempService::CalibPoint s_p1, s_p2;
+        TempService::CalibPoint p; 
+        if (g_tempSvc->collectCalibPoint(25.0 /*示例*/, 64, p)) {
+          s_p2 = p;
+          Serial.printf("[Cal] p2: true=%.3f, meas=%.3f\n", p.t_true, p.t_meas);
+          Serial.println("Put probe into point#3 (e.g., warm 50.0C), then 'y'.");
+          cal_state = CalState::WAIT3;
+        } else {
+          Serial.println("[Cal] p2 failed, retry: 'y'");
+          cal_state = CalState::WAIT2;
+        }
+        return;
+      }
+      case CalState::WAIT3:
+        if (Serial.available()) {
+          if (Serial.read() == 'y') { cal_state = CalState::DO3; Serial.println("[Cal] Sampling point#3..."); }
+        }
+        return;
+      case CalState::DO3: {
+        static TempService::CalibPoint s_p1, s_p2, s_p3;
+        TempService::CalibPoint p; 
+        if (g_tempSvc->collectCalibPoint(50.0 /*示例*/, 64, p)) {
+          s_p3 = p;
+          if (TempService::fitThreePoint(s_p1, s_p2, s_p3, g_coeff)) {
+            g_tempSvc->setCalib(g_coeff);
+            Serial.printf("[Cal] Done. a=%.6g, b=%.6g, c=%.6g\n", g_coeff.a, g_coeff.b, g_coeff.c);
+            cal_state = CalState::DONE; cal_once = true;
+          } else {
+            Serial.println("[Cal] fit failed, restart from point#1: 'y'");
+            cal_state = CalState::WAIT1;
+          }
+        } else {
+          Serial.println("[Cal] p3 failed, retry: 'y'");
+          cal_state = CalState::WAIT3;
+        }
+        return;
+      }
+      default: break;
+    }
+  }
   if (adc->waitDRDY(100)) {
     int32_t raw_value;
     
