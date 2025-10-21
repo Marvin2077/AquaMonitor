@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-// 包含您编写的所有驱动层头文件
+//所有驱动层头文件
 #include "spi_hal.h"        // 底层硬件操作
 #include "ads124s08_board_glue.h"     // 胶水层
 #include "ads124s08_drv.h"  // 通用驱动层
@@ -25,17 +25,19 @@ static const int CS_AD5941 = 26; // 假设 AD5941 的 CS 连接到 GPIO 26
 static const int RESET_AD5941 = 25; // 假设 RESET 连接到 GPIO 25 (如果连接了)
 // static const int INT_AD5941 = 34;   // 假设中断输出连接到 GPIO 34 (仅输入引脚)
 
-// 定义外部参考电压值，用于后续电压转换计算
-// 请根据您实际连接到 REFP0/REFN0 的参考电压修改此值
+// 定义外部参考电压值，用于后续电压转换计算 请根据您实际连接到 REFP0/REFN0 的参考电压修改此值
 const double V_REF = 1.57; 
 
-// 这里先声明，具体初始化在 setup() 中完成
 // 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* adc = nullptr;
 // 创建 AD5941 驱动对象指针
 AD5941_Drv* afe = nullptr;
 //创建 Temp Service 对象指针
 TempService* g_tempSvc = nullptr;
+
+// === Calibration control ===
+static bool cal_enabled = false;   // 默认不进校准流程
+// 可选：启动就想进校准可改为 true
 
 void setup() {
   Serial.begin(115200);
@@ -111,6 +113,10 @@ void setup() {
   Serial.println("[Cal] Ready for 3-point calibration.");
   Serial.println("Put probe into point #1 (e.g., 0.0C), then type 'y' + Enter.");
   Serial.println("Tip: You can type a number (e.g., 23.7) to set the true temperature, then type 'y' to sample.");
+  Serial.println("[Cmd] Type: 'cal on'  -> enable 3-point calibration");
+  Serial.println("[Cmd]       'cal off' -> skip calibration (normal reading)");
+  Serial.println("[Cmd]       'cal print' -> show current coeff");
+  Serial.println("[Cmd]       'cal reset' -> clear coeff & redo later");
 
   
   // 完成温度校准程序初始化
@@ -133,7 +139,45 @@ void loop() {
   if (!adc) {
     return;
   }
-if (!cal_once && g_tempSvc) {
+
+  if (!cal_enabled && Serial.available()) {
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim(); cmd.toLowerCase();
+
+  if (cmd == "cal on") {
+    cal_enabled = true;
+    cal_once = false;
+    cal_state = CalState::WAIT1;
+    Serial.println("[Cal] ENABLED. Enter point #1 true T (e.g., 0 or 23.7), then 'y' to sample.");
+    return;
+  } else if (cmd == "cal off") {
+    cal_enabled = false;
+    Serial.println("[Cal] DISABLED. Running normal measurement.");
+    return;
+  } else if (cmd == "cal print") {
+    if (g_tempSvc) {
+      auto c = g_tempSvc->getCalib();
+      if (c.valid) {
+        Serial.printf("[Cal] Coeff: a=%.6g, b=%.6g, c=%.6g\n", c.a, c.b, c.c);
+      } else {
+        Serial.println("[Cal] No valid coeff yet.");
+      }
+    }
+    return;
+  } else if (cmd == "cal reset") {
+    if (g_tempSvc) {
+      TempService::CalibCoeff empty; // 默认 valid=false
+      g_tempSvc->setCalib(empty);
+    }
+    cal_once = false;
+    Serial.println("[Cal] Coeff cleared. Use 'cal on' to re-calibrate.");
+    return;
+  }
+}
+
+
+
+if (cal_enabled && !cal_once && g_tempSvc) {
     switch (cal_state) {
       case CalState::WAIT1:
         if (Serial.available()) {
@@ -145,6 +189,11 @@ if (!cal_once && g_tempSvc) {
           } else if (s.length()) {
             t1_true = s.toFloat(); // 输入数字即更新“真实温度”
             Serial.printf("[Cal] Set point#1 T_true=%.3fC. Type 'y' to sample.\n", t1_true);
+          }
+           if (s.equalsIgnoreCase("x")) {
+           cal_enabled = false;
+           Serial.println("[Cal] CANCELED. Back to normal measurement.");
+            return;
           }
         }
         return;
@@ -172,6 +221,11 @@ if (!cal_once && g_tempSvc) {
             t2_true = s.toFloat();
             Serial.printf("[Cal] Set point#2 T_true=%.3fC. Type 'y' to sample.\n", t2_true);
           }
+           if (s.equalsIgnoreCase("x")) {
+           cal_enabled = false;
+           Serial.println("[Cal] CANCELED. Back to normal measurement.");
+            return;
+          }
         }
         return;
       case CalState::DO2: {
@@ -198,6 +252,11 @@ if (!cal_once && g_tempSvc) {
           } else if (s.length()) {
             t3_true = s.toFloat();
             Serial.printf("[Cal] Set point#3 T_true=%.3fC. Type 'y' to sample.\n", t3_true);
+          }
+          if (s.equalsIgnoreCase("x")) {
+           cal_enabled = false;
+           Serial.println("[Cal] CANCELED. Back to normal measurement.");
+          return;
           }
         }
         return;
