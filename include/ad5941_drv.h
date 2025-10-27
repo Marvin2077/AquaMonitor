@@ -61,7 +61,7 @@ public:
 
         // 高速 TIA (P52, Table 37)
         HSRTIACON       = 0x20F0, // HS Rtia 配置
-        DEORESCON       = 0x20F8, // DE0 引脚 Rtia/Rload 配置
+        DE0RESCON       = 0x20F8, // DE0 引脚 Rtia/Rload 配置
         HSTIACON        = 0x20FC, // HSTIA 配置 (Vbias源选择)
 
         // ADC 控制 (P58, Table 42)
@@ -80,6 +80,10 @@ public:
         NSWFULLCON      = 0x2154, // N 开关完整配置
         PSWFULLCON      = 0x2158, // P 开关完整配置
         TSWFULLCON      = 0x215C, // T 开关完整配置
+        DSWSTA          = 0x21B0,
+        PSWSTA          = 0x21B4,
+        NSWSTA          = 0x21B8,
+        TSWSTA          = 0x21BC,
         // ... 开关状态寄存器 ...
 
         // FIFO (P93, Table 94)
@@ -229,6 +233,8 @@ public:
      * @return true 读取成功, false 失败或数据未就绪
      */
     bool readImpedanceData(int32_t& realPartRaw, int32_t& imaginaryPartRaw); // 先读取原始值
+
+    bool outputSineToCE0(float f_hz, uint16_t amp_code, bool high_bw);
 
 
 private:

@@ -1,5 +1,6 @@
 #include "ad5941_drv.h"
-#include <Arduino.h>
+#include <Arduino.h> // For Serial printouts if enabled
+
 // 构造函数：保存 HAL 回调
 AD5941_Drv::AD5941_Drv(const Hal& hal) : hal_(hal) {}
 
@@ -7,26 +8,43 @@ AD5941_Drv::AD5941_Drv(const Hal& hal) : hal_(hal) {}
 bool AD5941_Drv::begin() {
     // 检查 HAL 指针是否有效 (可选但推荐)
     if (!hal_.cs_assert || !hal_.cs_release || !hal_.spi_txrx || !hal_.delay_us || !hal_.delay_ms) {
+        if (Serial) Serial.println("AD5941 Begin Error: HAL functions missing");
         return false; // HAL 不完整
     }
     // 执行强制初始化序列
-    return initializeChipMandatorySequence();
+    if (!initializeChipMandatorySequence()) {
+        if (Serial) Serial.println("AD5941 Begin Error: Mandatory init sequence failed");
+        return false;
+    }
+    return true;
 }
 
 // 执行软件复位
 bool AD5941_Drv::softwareReset() {
+    if (Serial) Serial.println("Performing AD5941 software reset...");
     // 软件复位需要密钥 (Datasheet P127)
-    if (!writeRegister16(Reg::RSTCONKEY, 0x12EA)) return false; // 写入密钥
-    if (!writeRegister16(Reg::SWRSTCON, 0xA158)) return false; // 触发复位
-    hal_.delay_ms(2); // 复位后需要短暂延时等待芯片稳定
-    // 可能需要重新执行 begin() 中的初始化序列
-    return initializeChipMandatorySequence();
+    if (!writeRegister16(Reg::RSTCONKEY, 0x12EA)) {
+        if (Serial) Serial.println("Software Reset Error: Failed to write reset key");
+        return false; // 写入密钥
+    }
+    if (!writeRegister16(Reg::SWRSTCON, 0xA158)) {
+        if (Serial) Serial.println("Software Reset Error: Failed to trigger reset");
+        return false; // 触发复位
+    }
+    hal_.delay_ms(5); // 复位后需要短暂延时等待芯片稳定 (Increased delay slightly for safety)
+    // 必须重新执行初始化序列
+    if (!initializeChipMandatorySequence()) {
+        if (Serial) Serial.println("Software Reset Error: Re-initialization failed");
+        return false;
+    }
+    if (Serial) Serial.println("AD5941 software reset complete.");
+    return true;
 }
 
 // 读取芯片 ID
 bool AD5941_Drv::readChipID(uint16_t& adi_id, uint16_t& chip_id) {
-    if (!readRegister16(Reg::ADIID, adi_id)) return false;
-    if (!readRegister16(Reg::CHIPID, chip_id)) return false;
+    if (!readRegister16(Reg::ADIID, adi_id)) return false; //
+    if (!readRegister16(Reg::CHIPID, chip_id)) return false; //
     return true;
 }
 
@@ -54,8 +72,6 @@ bool AD5941_Drv::spiReadReg(uint16_t address, uint8_t* data, size_t length) {
          return false;
     }
 
-    if(Serial) Serial.printf("spiReadReg: Attempting to read address 0x%04X, length %d\n", address, length);
-
     // --- 事务 1: 设置地址 ---
     hal_.cs_assert();
     uint8_t addr_cmd[3] = {
@@ -63,9 +79,6 @@ bool AD5941_Drv::spiReadReg(uint16_t address, uint8_t* data, size_t length) {
         (uint8_t)(address >> 8),   // 地址高字节
         (uint8_t)(address & 0xFF)  // 地址低字节
     };
-    if(Serial) Serial.print("  TX1 (SET_ADDR): ");
-    for (int i = 0; i < 3; ++i) { if(Serial) Serial.printf("%02X ", addr_cmd[i]); }
-    if(Serial) Serial.println();
 
     if (!hal_.spi_txrx(addr_cmd, nullptr, 3)) { // 发送命令和地址
         if(Serial) Serial.println("  TX1 FAILED!");
@@ -79,8 +92,6 @@ bool AD5941_Drv::spiReadReg(uint16_t address, uint8_t* data, size_t length) {
     // --- 事务 2: 读取数据 ---
     hal_.cs_assert();
     uint8_t read_cmd[1] = { (uint8_t)SpiCmd::READ_REG }; // 读命令字节
-    if(Serial) Serial.print("  TX2 (READ_REG Cmd): ");
-    if(Serial) Serial.printf("%02X \n", read_cmd[0]);
 
     if (!hal_.spi_txrx(read_cmd, nullptr, 1)) { // 发送读命令
         if(Serial) Serial.println("  TX2 Cmd FAILED!");
@@ -88,26 +99,18 @@ bool AD5941_Drv::spiReadReg(uint16_t address, uint8_t* data, size_t length) {
         return false;
     }
 
-    // *** 关键修复：发送 1 个虚拟字节以启动读取，并忽略 MISO 上的返回 ***
+    // 发送 1 个虚拟字节以启动读取，并忽略 MISO 上的返回
     uint8_t initial_dummy_tx = 0xAA; // 虚拟字节内容不重要
     uint8_t initial_dummy_rx = 0;    // 存储 MISO 返回值的变量（将被丢弃）
-    if(Serial) Serial.print("  TX2 (Initial Dummy): ");
-    if(Serial) Serial.printf("%02X \n", initial_dummy_tx);
     if (!hal_.spi_txrx(&initial_dummy_tx, &initial_dummy_rx, 1)) { // 执行 1 字节 SPI 传输
         if(Serial) Serial.println("  TX2 Initial Dummy FAILED!");
         hal_.cs_release();
         return false;
     }
-    if(Serial) Serial.print("  RX2 (Discarded after dummy): ");
-    if(Serial) Serial.printf("%02X \n", initial_dummy_rx); // 打印被丢弃的字节 (预期是之前的 0x80)
 
-    // *** 现在，发送 length 个虚拟字节，同时接收 length 个有效数据字节 ***
+    // 发送 length 个虚拟字节，同时接收 length 个有效数据字节
     uint8_t data_dummy_tx[length]; // 最多 4 字节
     for (size_t i = 0; i < length; ++i) data_dummy_tx[i] = 0xBB; // 用不同的值区分
-
-    if(Serial) Serial.print("  TX2 (Data Dummies): ");
-    for (size_t i = 0; i < length; ++i) { if(Serial) Serial.printf("%02X ", data_dummy_tx[i]); }
-    if(Serial) Serial.println();
 
     // 执行 SPI 传输，发送虚拟字节，并将接收到的数据存入调用者提供的 data 指针
     if (!hal_.spi_txrx(data_dummy_tx, data, length)) {
@@ -116,40 +119,45 @@ bool AD5941_Drv::spiReadReg(uint16_t address, uint8_t* data, size_t length) {
         return false;
     }
 
-    // 打印实际接收到的有效数据
-    if(Serial) Serial.print("  RX2 (Received Data): ");
-    for (size_t i = 0; i < length; ++i) { if(Serial) Serial.printf("%02X ", data[i]); }
-    if(Serial) Serial.println();
-
     hal_.cs_release(); // 结束事务
-    if(Serial) Serial.println("spiReadReg: Success.");
     return true; // 成功完成读取
 }
 
 // 底层 SPI 写寄存器实现 (处理两阶段协议)
 bool AD5941_Drv::spiWriteReg(uint16_t address, const uint8_t* data, size_t length) {
-     if (!data || (length != 2 && length != 4)) return false; // 只支持写 16 位或 32 位
+     if (!data || (length != 2 && length != 4)) {
+         if(Serial) Serial.println("spiWriteReg Error: Invalid length (must be 2 or 4)");
+         return false; // 只支持写 16 位或 32 位
+     }
+     // 检查 HAL 指针
+    if (!hal_.cs_assert || !hal_.cs_release || !hal_.spi_txrx || !hal_.delay_us) {
+         if(Serial) Serial.println("spiWriteReg Error: HAL functions missing");
+         return false;
+    }
 
     // 事务 1: 设置地址
     hal_.cs_assert();
     uint8_t addr_cmd[3] = { (uint8_t)SpiCmd::SET_ADDR, (uint8_t)(address >> 8), (uint8_t)(address & 0xFF) };
     if (!hal_.spi_txrx(addr_cmd, nullptr, 3)) {
+        if(Serial) Serial.printf("spiWriteReg Error: TX1 failed for addr 0x%04X\n", address);
         hal_.cs_release();
         return false;
     }
     hal_.cs_release();
 
-    hal_.delay_us(1); // 两个事务之间的短暂延时
+    hal_.delay_us(5); // 确保满足 CS 高电平时间 t10 (>= 80ns)
 
     // 事务 2: 写入数据
     hal_.cs_assert();
-    uint8_t write_cmd[1] = { (uint8_t)SpiCmd::WRITE_REG };
+    uint8_t write_cmd[1] = { (uint8_t)SpiCmd::WRITE_REG }; //
     if (!hal_.spi_txrx(write_cmd, nullptr, 1)) { // 发送写命令
+        if(Serial) Serial.printf("spiWriteReg Error: TX2 cmd failed for addr 0x%04X\n", address);
         hal_.cs_release();
         return false;
     }
     // 发送数据
     if (!hal_.spi_txrx(data, nullptr, length)) {
+        if(Serial) Serial.printf("spiWriteReg Error: TX2 data failed for addr 0x%04X\n", address);
         hal_.cs_release();
         return false;
     }
@@ -209,42 +217,39 @@ bool AD5941_Drv::writeRegister16(uint16_t address, uint16_t value) {
 
 
 // 执行强制初始化序列 (私有函数)
+// 根据 Datasheet Page 29, Table 14
 bool AD5941_Drv::initializeChipMandatorySequence() {
-    // 写入 Datasheet Page 29, Table 14 中的所有值
-    // 注意：这里的寄存器地址是 16 位的，但写入的值可能是 16 位或 32 位
-    // 我们统一使用 32 位写入，高位补零即可
-
-    // 注释说明每个写入的目的，如果已知的话
-    if (!writeRegister(0x0908, 0x02C9)) return false; // 未知目的，来自 Table 14
-    if (!writeRegister(0x0C08, 0x206C)) return false; // 未知目的，来自 Table 14
-    if (!writeRegister(0x21F0, 0x0010)) return false; // REPEATADCCNV 设置? 来自 Table 14
-    if (!writeRegister(0x0410, 0x02C9)) return false; // CLKEN1 设置? 来自 Table 14
-    if (!writeRegister(0x0A28, 0x0009)) return false; // EI2CON 设置? 来自 Table 14
-    if (!writeRegister(0x238C, 0x0104)) return false; // ADCBUFCON 设置? 来自 Table 14
+    if (Serial) Serial.println("Executing AD5941 mandatory initialization sequence...");
+    // 统一使用 32 位写入，高位补零
+    if (!writeRegister(0x0908, 0x000002C9)) return false; //
+    if (!writeRegister(0x0C08, 0x0000206C)) return false; //
+    if (!writeRegister(0x21F0, 0x00000010)) return false; //
+    if (!writeRegister(0x0410, 0x000002C9)) return false; //
+    if (!writeRegister(0x0A28, 0x00000009)) return false; //
+    if (!writeRegister(0x238C, 0x00000104)) return false; //
 
     // 写入电源模式密钥
-    if (!writeRegister(0x0A04, 0x4859)) return false; // PWRKEY Part 1
-    if (!writeRegister(0x0A04, 0xF27B)) return false; // PWRKEY Part 2
-    // 写入电源模式配置 (Table 14 示例值 0x8009, 但根据 P129, 0x0001 是 Active Mode)
-    // 0x8009 = RAMRETEN=1, ???, PWRMOD=Active. 使用 0x8001 更安全? 先用 Table 14 的
-    if (!writeRegister(0x0A00, 0x8009)) return false; // PWRMOD 设置
+    if (!writeRegister(0x0A04, 0x00004859)) return false; // PWRKEY Part 1
+    if (!writeRegister(0x0A04, 0x0000F27B)) return false; // PWRKEY Part 2
+    // 写入电源模式配置 (Table 14: 0x8009 -> RAMRETEN=1, Active Mode=1)
+    if (!writeRegister(0x0A00, 0x00008009)) return false; // PWRMOD
 
-    // 写入电源带宽配置 (Table 14 要求写 0x0000)
-    if (!writeRegister(0x22F0, 0x0000)) return false; // PMBW 清零 (Low power mode, Auto BW)
+    // 写入电源带宽配置 (Table 14 要求写 0x0000 -> Low power mode, Auto BW)
+    if (!writeRegister(0x22F0, 0x00000000)) return false; // PMBW
 
-    hal_.delay_ms(2); // 初始化后稍作延时
+    hal_.delay_ms(5); // 初始化后稍作延时，确保稳定
 
     // 读取 ID 验证 SPI 通信
     uint16_t adi_id = 0, chip_id = 0;
     if (!readChipID(adi_id, chip_id)) {
-        // Serial.println("Failed to read chip ID after init!"); // 如果有 Serial
+        if (Serial) Serial.println("Init Error: Failed to read chip ID after init sequence!");
         return false;
     }
-    if (adi_id != 0x4144) {
-        // Serial.printf("Wrong ADI ID: 0x%04X\n", adi_id); // 如果有 Serial
+    if (adi_id != 0x4144) { //
+        if (Serial) Serial.printf("Init Error: Wrong ADI ID read: 0x%04X\n", adi_id);
         return false; // ID 不匹配，通信可能存在问题
     }
-    // Serial.printf("AD5941 Initialized. ADI ID: 0x%04X, CHIP ID: 0x%04X\n", adi_id, chip_id); // 如果有 Serial
+    if (Serial) Serial.printf("AD5941 Initialized OK. ADI ID: 0x%04X, CHIP ID: 0x%04X\n", adi_id, chip_id);
 
     return true;
 }
@@ -252,28 +257,30 @@ bool AD5941_Drv::initializeChipMandatorySequence() {
 // ===== 高层函数占位符 =====
 
 bool AD5941_Drv::startMeasurement() {
+    // 这个函数的目标是启动一次配置好的测量（例如，DFT）
+    // 通常意味着使能 ADC 转换
     uint32_t afecon = 0;
     if (!readRegister(Reg::AFECON, afecon)) return false;
-    // 保险：先确保 ADC 上电
-    afecon |= AfeConBits::ADCEN;
-    // 启动转换
-    afecon |= AfeConBits::ADCCONVEN;
+    // 保险：先确保 ADC 上电 (ADCEN, Bit 7)
+    afecon |= (1u << 7);
+    // 启动转换 (ADCCONVEN, Bit 8)
+    afecon |= (1u << 8);
     return writeRegister(Reg::AFECON, afecon);
 }
 
 bool AD5941_Drv::readImpedanceData(int32_t& realPartRaw, int32_t& imaginaryPartRaw) {
-    // TODO: 读取 DFT 结果寄存器
+    // 读取 DFT 结果寄存器
     uint32_t real_reg, imag_reg;
-    if (!readRegister(Reg::DFTREAL, real_reg)) return false;
-    if (!readRegister(Reg::DFTIMAG, imag_reg)) return false;
+    if (!readRegister(Reg::DFTREAL, real_reg)) return false; //
+    if (!readRegister(Reg::DFTIMAG, imag_reg)) return false; //
 
-    // DFT 结果是 18 位有符号数，存储在低 18 位
+    // DFT 结果是 18 位有符号数 (twos complement)，存储在寄存器的低 18 位
     realPartRaw = (real_reg & 0x3FFFF);
     imaginaryPartRaw = (imag_reg & 0x3FFFF);
 
-    // 进行符号扩展 (如果第 18 位是 1，则前面补 1)
-    if (realPartRaw & 0x20000) { // 检查符号位 (Bit 17)
-        realPartRaw |= 0xFFFC0000; // 将高位设为 1
+    // 手动进行符号扩展 (如果最高位 Bit 17 是 1，则前面补 1)
+    if (realPartRaw & 0x20000) { // 检查符号位 (Bit 17, 即 0x20000)
+        realPartRaw |= 0xFFFC0000; // 将高 14 位设为 1
     }
     if (imaginaryPartRaw & 0x20000) {
         imaginaryPartRaw |= 0xFFFC0000;
@@ -282,80 +289,237 @@ bool AD5941_Drv::readImpedanceData(int32_t& realPartRaw, int32_t& imaginaryPartR
     return true;
 }
 
-// ad5941_drv.cpp
-
+// 配置电导率测量的核心函数
 bool AD5941_Drv::configureConductivityMeasurement(float f_hz,
-                                                   uint16_t wg_amp_code,   // WGAMPLITUDE 的 11-bit 原码
-                                                   uint32_t dft_n,         // 1024/2048/4096/8192 等
-                                                   bool use_high_bw)       // 频率>80kHz 设 true
+                                                   uint16_t wg_amp_code,   // WGAMPLITUDE 的 11-bit 原码 (0..0x7FF)
+                                                   uint32_t dft_n,         // DFT 点数 (e.g., 4 to 16384)
+                                                   bool use_high_bw)       // 频率>=80kHz 置 true
 {
-  // 0) 频带/功耗：<80kHz 低功率；≥80kHz 置高功率（PMBW.SYSHS=1），并选合适 SYSBW 截止
-  //    这里：低功率 0x0000；高功率举例 0x000D（SYSHS=1，SYSBW=50k/100k/250k自动随 WG）:contentReference[oaicite:6]{index=6} :contentReference[oaicite:7]{index=7}
-  if (!writeRegister(Reg::PMBW, use_high_bw ? 0x000D : 0x0000)) return false;
+    if (Serial) Serial.printf("Configuring AD5941 for Cond: f=%.1fHz, amp=0x%X, N=%u, high_bw=%d\n", f_hz, wg_amp_code, dft_n, use_high_bw);
 
-  // 1) 波形发生器参数：先写 WGFCW/WGPHASE/WGOFFSET/WGAMPLITUDE，再开 TYPESEL 与 AFECON.WAVEGENEN
-  //    f = 16MHz * FCW / 2^30；WGAMPLITUDE 为 11-bit 幅度码（受 HSDAC 增益/衰减影响）:contentReference[oaicite:8]{index=8} :contentReference[oaicite:9]{index=9}
-  const double fACLK = 16e6;
-  uint32_t fcw = (uint32_t)((f_hz * (1u<<30)) / fACLK);
+    // -------------------------
+    // 0) 频带/功耗：根据频率选择 PMBW
+    // -------------------------
+    // Low power mode (<80kHz): PMBW.SYSHS=0, SYSBW 根据需要自动或手动设置 (这里设为 0 自动)
+    // High power mode (>80kHz): PMBW.SYSHS=1, SYSBW 通常设为 250kHz (11b)
+    uint32_t pmbw_val = 0;
+    if (use_high_bw) {
+        pmbw_val = (1u << 0) | (0x3u << 2); // SYSHS=1, SYSBW=250kHz
+    } else {
+        pmbw_val = (0u << 0) | (0x0u << 2); // SYSHS=0, SYSBW=Auto (or set manually if needed)
+    }
+    if (!writeRegister(Reg::PMBW, pmbw_val)) {
+        if (Serial) Serial.println("Cond Cfg Error: Failed to write PMBW");
+        return false;
+    }
+
+    // -------------------------
+    // 1) 波形发生器：正弦 + 频率/幅度/相位/直流偏置
+    // -------------------------
+    // f_out = f_ACLK * FCW / 2^30
+    // 默认 f_ACLK = 16MHz (由系统时钟决定，需确认)
+    // 注意: high_bw 模式下 ADC 时钟可能是 32MHz, 但系统时钟(驱动波形发生器)通常仍是 16MHz
+    // 如果系统时钟被分频，这里的 fACLK 需要相应调整。目前假设系统时钟为 16MHz。
+    const double fACLK = 16.0e6;
+    uint32_t fcw = (uint32_t)(((double)f_hz * (1ull << 30)) / fACLK); // Use 1ull for 64-bit intermediate
+    if (fcw >= (1u << 24)) fcw = (1u << 24) - 1; // FCW is 24 bits
+
+    if (!writeRegister(Reg::WGFCW, fcw)) return false; //
+    if (!writeRegister(Reg::WGPHASE, 0u)) return false; // 0 相位
+    if (!writeRegister(Reg::WGOFFSET, 0x800u)) return false; // Sinusoid offset = midscale (0 V DC offset relative to common mode)
+    if (!writeRegister(Reg::WGAMPLITUDE, (uint32_t)(wg_amp_code & 0x7FF))) return false; //
+
+    // 选择正弦模式（WGCON.TYPESEL=10b）
+    // 确保 DAC 校准使能位被设置 (默认值)
+    uint32_t wgcon = 0;
+    if (!readRegister(Reg::WGCON, wgcon)) return false;
+    wgcon &= ~((uint32_t)0x3 << 1); // Clear TYPESEL bits
+    wgcon |=  (0x2u << 1);          // TYPESEL=10 : Sinusoid
+    wgcon |= (1u << 5);             // Ensure DACGAINCAL=1
+    wgcon |= (1u << 4);             // Ensure DACOFFSETCAL=1
+    if (!writeRegister(Reg::WGCON, wgcon)) return false;
+
+    // -------------------------
+    // 2) HSTIA 正端偏置 & DE0 电阻组合
+    // -------------------------
+    // HSTIACON：VBIASSEL=00 -> 选择 VBIAS_CAP (1.11V) 作为 HSTIA+ 偏置
+    // (之前选 VZERO0 是针对特定应用，对于通用阻抗测量，1.11V 更常用)
+    if (!writeRegister(Reg::HSTIACON, 0x00000000)) return false; // VBIASSEL = 00
+
+    // DE0RESCON：为 DE0 通路选择 RLOAD 和 RTIA 组合
+    // 示例: 选择 RLOAD=100 Ohm, RTIA = 5 kOhm (Code 0x64 from Table 36/181)
+    // 你可以根据实际需要调整这个值
+    if (!writeRegister(Reg::DE0RESCON, 0x00000064))  return false; // Example: RLOAD=100, RTIA=5k on DE0 path
+
+    // -------------------------
+    // 3) Switch Matrix：把回路真正连起来
+    //    - 激励输出 D -> CE0         : DSWFULLCON.D5 = 1
+    //    - P 节点 (正反馈) -> RE0   : PSWFULLCON.P5 = 1 (***重要反馈环路***)
+    //    - N 节点 (负反馈) -> SE0   : NSWFULLCON.N5 = 1 (经 RLOAD_SE0, 通常为 100 Ohm)
+    //    - 电流检测输入 TIA- -> DE0 : TSWFULLCON.T10 = 1 (T9 必须断开)
+    //    然后置 SWCON.SWSOURCESEL=1，让 FULLCON 生效
+    // -------------------------
+    // 先全部清零，再按需置位
+    if (!writeRegister(Reg::DSWFULLCON, 0u)) return false;
+    if (!writeRegister(Reg::NSWFULLCON, 0u)) return false;
+    if (!writeRegister(Reg::PSWFULLCON, 0u)) return false;
+    if (!writeRegister(Reg::TSWFULLCON, 0u)) return false;
+
+    uint32_t dsw_val = (1u << 5); // D5=1 -> D to CE0
+    uint32_t psw_val = (1u << 4); // P5=1 -> P to RE0 (Datasheet Fig 36 shows P5 connects to RE0, Bit 4 controls P5)
+    uint32_t nsw_val = (1u << 5); // N5=1 -> N to SE0 (via Rload_SE0)
+    uint32_t tsw_val = (1u << 9); // T10=1 -> TIA- to DE0 (T9 is implicitly 0)
+
+    if (!writeRegister(Reg::DSWFULLCON, dsw_val)) return false;
+    if (!writeRegister(Reg::PSWFULLCON, psw_val)) return false;
+    if (!writeRegister(Reg::NSWFULLCON, nsw_val)) return false;
+    if (!writeRegister(Reg::TSWFULLCON, tsw_val)) return false;
+
+    // SWCON：选择由 xSWFULLCON 驱动 (SWSOURCESEL=1)
+    uint32_t swcon = 0;
+    if (!readRegister(Reg::SWCON, swcon)) return false;
+    swcon |= (1u << 16); // SWSOURCESEL=1
+    // 当 SWSOURCESEL=1 时，不需要再操作 SWCON 的 T9CON/T10CON 位
+    if (!writeRegister(Reg::SWCON, swcon)) return false;
+
+    // 等待开关稳定 (可选但推荐)
+    hal_.delay_us(100);
+
+    // -------------------------
+    // 4) ADC/AFE 使能: 确保 ADC, HSDAC, HSTIA, Excitation Buffer, High Speed Reference 都已使能
+    // -------------------------
+    uint32_t afecon = 0;
+    if (!readRegister(Reg::AFECON, afecon)) return false;
+    afecon &= ~(1u << 5); // HSREFDIS=0 -> 使能高速参考
+    afecon |= (1u << 6);  // DACEN=1    -> 使能 HSDAC
+    afecon |= (1u << 7);  // ADCEN=1    -> 使能 ADC
+    afecon |= (1u << 9);  // EXBUFEN=1  -> 使能激励缓冲器
+    afecon |= (1u << 11); // TIAEN=1    -> 使能高速 TIA
+    afecon |= (1u << 14); // WAVEGENEN=1-> 使能波形发生器
+    // ADCCONVEN (Bit 8) 在这里不设置，由 startMeasurement() 控制
+    afecon &= ~(1u << 8); // 确保 ADCCONVEN = 0
+    if (!writeRegister(Reg::AFECON, afecon)) {
+        if (Serial) Serial.println("Cond Cfg Error: Failed to write AFECON for enables");
+        return false;
+    }
+
+    // -------------------------
+    // 5) ADC MUX & Gain
+    // -------------------------
+    // ADCCON: 选择 HSTIA 输出作为正输入, VBIAS_CAP 作为负输入, 设置 PGA Gain
+    uint32_t adccon = 0;
+    adccon |= (0x9u << 8);  // MUXSELN = VBIAS_CAP (01000b = 8, not 9! Corrected: 0x8u)
+    adccon |= (0x1u << 0);  // MUXSELP = HSTIA Positive Output (000001b = 1)
+    adccon |= (0x1u << 16); // GNPGA = Gain 1.5 (001b = 1) (或者根据信号幅度选其他增益)
+    if (!writeRegister(Reg::ADCCON, adccon)) return false;
+
+    // -------------------------
+    // 6) ADC 滤波与 DFT 配置
+    // -------------------------
+    // ADCFILTERCON: 设置 ADC 速率, SINC3 OSR, 旁路 SINC2 和 Notch Filter
+    uint32_t adcf = 0;
+    adcf |= (1u << 0); // ADCSAMPLERATE = 1 -> 800 kSPS (for low power mode) (High power mode might need 0 for 1.6MHz)
+    if(use_high_bw) {
+         adcf &= ~(1u << 0); // ADCSAMPLERATE = 0 -> 1.6 MHz for high power mode
+    }
+    adcf |= (0x1u << 12); // SINC3OSR = 1 -> OSR 4 (Recommended)
+    adcf |= (1u << 6); // SINC3BYP = 1 -> Bypass SINC3 for wider bandwidth at DFT input (重要: 否则高频信号会被 SINC3 衰减)
+    // SINC2 和 Notch filter 保持默认旁路或禁用状态 (根据复位值)
+    if (!writeRegister(Reg::ADCFILTERCON, adcf)) return false;
+
+    // DFTCON: 设置 DFT 点数 (N), Hanning 窗使能, DFT 输入源
+    uint32_t dftnum_code = 9; // Default 2048 points
+    if (dft_n == 4) dftnum_code = 0;
+    else if (dft_n == 8) dftnum_code = 1;
+    else if (dft_n == 16) dftnum_code = 2;
+    else if (dft_n == 32) dftnum_code = 3;
+    else if (dft_n == 64) dftnum_code = 4;
+    else if (dft_n == 128) dftnum_code = 5;
+    else if (dft_n == 256) dftnum_code = 6;
+    else if (dft_n == 512) dftnum_code = 7;
+    else if (dft_n == 1024) dftnum_code = 8;
+    else if (dft_n == 2048) dftnum_code = 9;
+    else if (dft_n == 4096) dftnum_code = 10;
+    else if (dft_n == 8192) dftnum_code = 11;
+    else if (dft_n == 16384) dftnum_code = 12;
+
+    uint32_t dftcon = 0;
+    dftcon |= (1u << 0); // HANNINGEN = 1 -> Enable Hanning window
+    dftcon |= ((dftnum_code & 0xF) << 4); // DFTNUM (Bits 7:4)
+    // DFTINSEL (Bits 21:20): Select input after Gain/Offset (with or without SINC3)
+    // Since we bypassed SINC3, this selects ADC raw data after gain/offset
+    dftcon |= (0x1u << 20); // DFTINSEL = 01b
+    if (!writeRegister(Reg::DFTCON, dftcon)) return false;
+
+    // 最后: 确保 DFT 硬件加速器在 AFECON 中使能
+    if (!readRegister(Reg::AFECON, afecon)) return false;
+    afecon |= (1u << 15); // DFTEN=1
+    if (!writeRegister(Reg::AFECON, afecon)) return false;
+
+
+    if (Serial) Serial.println("AD5941 Configuration for Conductivity Measurement OK.");
+    return true;
+}
+
+
+// 检查 DFT 测量是否完成
+bool AD5941_Drv::isMeasurementReady() {
+  uint32_t flag = 0;
+  // DFT 完成标志位在 INTCFLAG0 或 INTCFLAG1 的 Bit 1
+  if (!readRegister(Reg::INTCFLAG0, flag)) { // 检查中断标志寄存器 0
+      if (!readRegister(Reg::INTCFLAG1, flag)) return false; // 如果 0 读取失败，尝试读取 1
+  }
+
+  if (flag & (1u << 1)) { // FLAG1: DFT result ready?
+    // 清除标志位 (写 1 清除)
+    if (!writeRegister(Reg::INTCCLR, (1u << 1))) {
+        // 如果清除失败，可能影响下次检测，但本次结果已准备好
+        if (Serial) Serial.println("Warning: Failed to clear DFT ready flag.");
+    }
+    return true;
+  }
+  return false; // DFT 结果尚未就绪
+}
+
+bool AD5941_Drv::outputSineToCE0(float f_hz, uint16_t amp_code, bool high_bw) {
+  // (A) PMBW
+  uint32_t pmbw = 0;
+  if (high_bw) pmbw = (1u<<0); // SYSHS=1
+  if (!writeRegister(Reg::PMBW, pmbw)) return false;
+
+  // (B) WG 参数
+  const double fACLK = high_bw ? 16e6 : 16e6; // WG 仍按 16MHz 计算
+  uint32_t fcw = (uint32_t)((f_hz * (1ull<<30)) / fACLK);
   if (fcw > 0xFFFFFF) fcw = 0xFFFFFF;
   if (!writeRegister(Reg::WGFCW, fcw)) return false;
-  if (!writeRegister(Reg::WGPHASE, 0u)) return false;
-  if (!writeRegister(Reg::WGOFFSET, 0u)) return false;
-  if (!writeRegister(Reg::WGAMPLITUDE, (uint32_t)(wg_amp_code & 0x7FF))) return false;
+  if (!writeRegister(Reg::WGPHASE, 0)) return false;
+  if (!writeRegister(Reg::WGOFFSET, 0)) return false;
+  if (!writeRegister(Reg::WGAMPLITUDE, amp_code & 0x7FF)) return false;
 
-  // 2) 选择正弦模式（WGCON.TYPESEL=10b）
+  // 选择正弦
   uint32_t wgcon = 0;
   if (!readRegister(Reg::WGCON, wgcon)) return false;
-  wgcon &= ~((uint32_t)0x3 << 1);
-  wgcon |= (0x2u << 1); // TYPESEL=10: Sinusoid
-  if (!writeRegister(Reg::WGCON, wgcon)) return false;  // :contentReference[oaicite:10]{index=10}
+  wgcon &= ~0x6;            // 清 TYPESEL
+  wgcon |= (2u<<1);         // TYPESEL=10b -> 正弦
+  if (!writeRegister(Reg::WGCON, wgcon)) return false;  // WG 设置完成（先别开 WAVEGEN）
 
-  // 3) 连接开关矩阵：DE0→HSTIA-（T10=1）；确保 T9=0；写完 xSWFULLCON 后需置 SWCON.SWSOURCESEL=1 生效。:contentReference[oaicite:11]{index=11}
-  uint32_t tsw = 0;
-  tsw |= (1u<<9);  // T10 closed
-  tsw |= (0u<<8);  // T9 open
-  if (!writeRegister(Reg::TSWFULLCON, tsw)) return false;
+  // (C) 只连 D->CE0
+  if (!writeRegister(Reg::DSWFULLCON, (1u<<5))) return false; // D5=1
   uint32_t swcon = 0;
   if (!readRegister(Reg::SWCON, swcon)) return false;
-  swcon |= (1u<<0); // SWSOURCESEL=1: 使用 xSWFULLCON 的设置
+  swcon |= (1u<<0); // SWSOURCESEL=1
   if (!writeRegister(Reg::SWCON, swcon)) return false;
 
-  // 4) 使能 HSDAC（AFECON.DACEN=1），但先别开 WAVEGENEN，最后统一开；ADC 先上电（ADCEN=1）。:contentReference[oaicite:12]{index=12}
+  // (D) 打开 DAC 参考、DAC、本激励缓冲，最后开 WAVEGEN
   uint32_t afecon = 0;
   if (!readRegister(Reg::AFECON, afecon)) return false;
-  afecon |= (1u<<6); // DACEN
-  afecon |= (1u<<7); // ADCEN
+  afecon |= (1u<<20); // DACREFEN
+  afecon |= (1u<<9);  // EXBUFEN
+  afecon |= (1u<<6);  // DACEN
   if (!writeRegister(Reg::AFECON, afecon)) return false;
 
-  // 5) ADC 滤波 + DFT：DFT 输入选 SINC3 输出；根据 f_hz 设置 OSR 和 DFT 长度 N，建议加 Hanning 窗。:contentReference[oaicite:13]{index=13}
-  //    下面给一组保守设置：SINC3 OSR=4、SINC2 OSR=22（举例），请按你的采样率需要细调。
-  //    这里只示范把 DFTNUM/HANNING/输入源配置进去；位定义随你头文件映射。
-  uint32_t adcf = 0;
-  if (!readRegister(Reg::ADCFILTERCON, adcf)) return false;
-  // 清/设 OSR 位（这里不展开位域，保持你工程中的位定义）
-  // adcf = (adcf & ~MASK) | NEWVAL;
-  if (!writeRegister(Reg::ADCFILTERCON, adcf)) return false;
-
-  uint32_t dftcon = 0;
-  // 例：DFT 开启、输入=SINC3、HANNING=1、N= dft_n（映射到寄存器的编码由你在头文件里定义）
-  // dftcon = (DFTEN=1) | (DFTINSEL=SINC3) | (HANNING=1) | (DFTNUM编码)
-  if (!writeRegister(Reg::DFTCON, dftcon)) return false;
-
-  // 6) 最后开波形发生器输出（AFECON.WAVEGENEN=1），并启动 ADC 转换（ADCCONVEN=1）。:contentReference[oaicite:14]{index=14} :contentReference[oaicite:15]{index=15}
-  if (!readRegister(Reg::AFECON, afecon)) return false;
-  afecon |= (1u<<0);  // WAVEGENEN=1
-  afecon |= (1u<<8);  // ADCCONVEN=1
+  afecon |= (1u<<14); // WAVEGENEN
   if (!writeRegister(Reg::AFECON, afecon)) return false;
 
   return true;
-}
-
-bool AD5941_Drv::isMeasurementReady() {
-  uint32_t flag = 0;
-  if (!readRegister(Reg::INTCFLAG0, flag)) return false;
-  if (flag & (1u<<1)) { // FLAG1: DFT result ready
-    (void)writeRegister(Reg::INTCCLR, (1u<<1)); // 写 1 清除
-    return true;
-  }
-  return false;
 }
