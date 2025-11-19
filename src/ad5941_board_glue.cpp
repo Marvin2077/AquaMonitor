@@ -1,83 +1,128 @@
 #include "ad5941_board_glue.h"
 
-// 保存 AD5941 的板级状态，让回调能访问
-namespace { // 匿名命名空间
-    struct Ad5941State {
-        const SpiDevice* dev = nullptr;
-        // uint8_t pin_reset = 0xFF; // 如果需要 reset
-        // uint8_t pin_interrupt = 0xFF; // 如果需要 interrupt
-    } g_ad5941;
+// 用 C 方式引入 ADI 库头
+extern "C" {
+#include "ad5940.h"
+}
 
-    // --- 回调函数实现 ---
-    // 这些函数会被驱动通过 HAL 结构体调用
+namespace {
+/*
 
-    // 拉低片选
-    void cs_assert_5941() {
-        if (g_ad5941.dev) g_ad5941.dev->cs_low();
-    }
+g (全局结构体) 
+  ↓
+g.spi (指向SpiDevice的指针)
+  ↓
+g.spi->beginTxn() (调用SpiDevice的成员函数)
+  ↓
+SPI.beginTransaction(settings) (最终调用Arduino SPI库)
 
-    // 拉高片选
-    void cs_release_5941() {
-        if (g_ad5941.dev) g_ad5941.dev->cs_high();
-    }
+*/
+// 全局状态，供 C 回调访问
+struct State {
+  const SpiDevice* spi = nullptr;
+  uint8_t pin_reset = 0xFF;
+  uint8_t pin_int   = 0xFF;
+  bool in_txn = false;  // 是否处于一次 SPI 事务中（CsClr..CsSet 之间）
+} g;
 
-    // SPI 传输 (直接调用 spi_hal 的 transfer)
-    bool spi_txrx_5941(const uint8_t* tx, uint8_t* rx, size_t n) {
-        if (!g_ad5941.dev) return false;
-        g_ad5941.dev->beginTxn(); // 应用 SPI 设置
-        g_ad5941.dev->transfer(tx, rx, n);
-        g_ad5941.dev->endTxn();   // 释放 SPI 总线
-        return true;
-    }
+// ---- 以下为 ADI 库需要的 C 回调 ----
+extern "C" void AD5940_CsClr(void) {
+  if (!g.spi) return;
+  g.spi->beginTxn();         // 进入一次事务
+  g.in_txn = true;
+  g.spi->cs_low();           // 片选有效
+}
 
-    // 微秒延时
-    void delay_us_5941(uint32_t us) {
-        SpiHAL::delay_us(us); // 使用 spi_hal 中的延时
-    }
+extern "C" void AD5940_CsSet(void) {
+  if (!g.spi) return;
+  g.spi->cs_high();          // 片选无效
+  if (g.in_txn) {            // 结束事务
+    g.spi->endTxn();
+    g.in_txn = false;
+  }
+}
 
-    // 毫秒延时
-    void delay_ms_5941(uint32_t ms) {
-        SpiHAL::delay_ms(ms); // 使用 spi_hal 中的延时
-    }
+extern "C" void AD5940_ReadWriteNBytes(unsigned char *pSendBuffer, unsigned char *pRecvBuff, unsigned long length) {
+  if (!g.spi || length == 0) return;
+  g.spi->transfer(pSendBuffer, pRecvBuff, static_cast<size_t>(length));
+}
 
-} // namespace
+extern "C" void AD5940_Delay10us(uint32_t n) {
+  // ADI 要求：单位为 10us
+  if (n == 0) return;
+  SpiHAL::delay_us(n * 10);
+}
 
-// --- 对外 API 实现 ---
-namespace Ad5941BoardGlue {
+// 若接了硬复位脚，可以用库的复位钩子；未配置则空操作
+extern "C" void AD5940_RstClr(void) {
+  if (g.pin_reset == 0xFF) return;
+  digitalWrite(g.pin_reset, LOW);
+}
+extern "C" void AD5940_RstSet(void) {
+  if (g.pin_reset == 0xFF) return;
+  digitalWrite(g.pin_reset, HIGH);
+}
 
-    AD5941_Drv::Hal make_ad5941_hal(const Ad5941GlueConfig& cfg) {
-        // 1. 保存板级状态
-        g_ad5941.dev = cfg.spi;
-        // g_ad5941.pin_reset = cfg.pin_reset; // 如果有 reset
-        // g_ad5941.pin_interrupt = cfg.pin_interrupt; // 如果有 interrupt
+/* ================ 新增存根函数 ================ */
 
-        // 2. 初始化相关 GPIO
-        if (g_ad5941.dev) {
-            g_ad5941.dev->begin(); // 初始化 CS 引脚
-        }
-        // if (g_ad5941.pin_reset != 0xFF) { ... } // 如果有 reset 引脚，初始化
-        // if (g_ad5941.pin_interrupt != 0xFF) { pinMode(g_ad5941.pin_interrupt, INPUT_PULLUP); ... } // 如果有中断引脚，初始化
+/**
+ * @brief 清除MCU的中断标志 (存根)
+ * @details 我们的设计使用轮询，不使用MCU中断, 故此函数为空。
+ * 但库函数(AppBIOZInit)需要它, 必须定义。
+ */
+extern "C" uint32_t AD5940_ClrMCUIntFlag(void) {
+  // 我们不使用MCU中断, 所以这里什么都不做
+  return 1;
+}
 
-        // 3. 返回填充好的 HAL 结构体
-        AD5941_Drv::Hal hal = {
-            .cs_assert = cs_assert_5941,
-            .cs_release = cs_release_5941,
-            .spi_txrx = spi_txrx_5941,
-            .delay_us = delay_us_5941,
-            .delay_ms = delay_ms_5941
-            // 注意没有 read_drdy
-        };
-        return hal;
-    }
+/**
+ * @brief 获取MCU的中断标志 (存根)
+ * @details 我们的设计使用轮询, 不使用MCU中断。
+ * 为防止将来其他函数调用它, 我们提供一个存根。
+ */
+extern "C" uint32_t AD5940_GetMCUIntFlag(void) {
+  // 我们不使用MCU中断, 总是返回0 (没有中断)
+  return 0;
+}
 
-    // 可选的硬件复位函数
-    // void ad5941_hw_reset(const Ad5941GlueConfig& cfg) {
-    //     if (cfg.pin_reset != 0xFF) {
-    //         digitalWrite(cfg.pin_reset, LOW);
-    //         SpiHAL::delay_us(10); // 根据手册确定复位脉冲宽度 (P127, >1us)
-    //         digitalWrite(cfg.pin_reset, HIGH);
-    //         SpiHAL::delay_ms(2); // 复位后的稳定时间
-    //     }
-    // }
+} // anonymous namespace
 
-} // namespace Ad5941BoardGlue
+// ---- 对外 API 实现 ----
+namespace Ad5941Glue {
+
+void setup(const Config& cfg) {
+  g.spi       = cfg.spi;
+  g.pin_reset = cfg.pin_reset;
+  g.pin_int   = cfg.pin_int;
+
+  if (g.spi) {
+    // 初始化 CS 引脚并默认拉高
+    g.spi->begin();
+  }
+  if (g.pin_reset != 0xFF) {
+    pinMode(g.pin_reset, OUTPUT);
+    digitalWrite(g.pin_reset, HIGH);
+  }
+  if (g.pin_int != 0xFF) {
+    pinMode(g.pin_int, INPUT_PULLUP);
+  }
+}
+
+void hardware_reset(uint16_t low_us, uint16_t settle_ms) {
+  if (g.pin_reset == 0xFF) return;
+  digitalWrite(g.pin_reset, LOW);
+  SpiHAL::delay_us(low_us);
+  digitalWrite(g.pin_reset, HIGH);
+  SpiHAL::delay_ms(settle_ms);
+}
+
+uint32_t read_chip_id() {
+  // 可在 AD5940_Initialize() 前后调用，作为通信冒烟测试
+  return AD5940_ReadReg(REG_AFECON_ADIID);
+}
+
+bool ready() {
+  return g.spi != nullptr;
+}
+
+} // namespace Ad5941Glue

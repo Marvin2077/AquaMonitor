@@ -2,32 +2,29 @@
 #define AD5941_BOARD_GLUE_H
 
 #include <Arduino.h>
-#include "spi_hal.h"     // 复用之前的 spi_hal
-#include "ad5941_drv.h"  // 包含 AD5941 驱动头文件
+#include "spi_hal.h"
 
-// AD5941 Glue 对外配置结构体
-struct Ad5941GlueConfig {
-    const SpiDevice* spi;      // 指向 SpiDevice 配置 (包含 CS 引脚、速率、模式)
-    // uint8_t pin_reset;    // RESET 引脚 (如果硬件有连接) - 0xFF 表示未使用
-    // uint8_t pin_interrupt; // 用于接收中断的 GPIO 引脚 (如果使用中断模式) - 0xFF 表示未使用
+// 对外配置
+namespace Ad5941Glue {
+
+struct Config {
+  const SpiDevice* spi = nullptr;   // 必须：SPI 设备（内含 CS/Mode/Speed）
+  uint8_t pin_reset   = 0xFF;       // 可选：硬复位脚；0xFF 表示未连接
+  uint8_t pin_int     = 0xFF;       // 可选：中断脚（此版本未用）
 };
 
-// 对外 API 命名空间
-namespace Ad5941BoardGlue {
+/** 绑定 SPI/引脚并完成基础初始化（配置 CS 为输出并拉高） */
+void setup(const Config& cfg);
 
-    /**
-     * @brief 创建并返回 AD5941 驱动所需的 HAL 结构体
-     * @param cfg 包含 SPI 设备和引脚配置的结构体
-     * @return 配置好的 AD5941_Drv::Hal 结构体
-     */
-    AD5941_Drv::Hal make_ad5941_hal(const Ad5941GlueConfig& cfg);
+/** 若连了硬复位脚，执行一次低-高脉冲；未配置则空操作 */
+void hardware_reset(uint16_t low_us = 10, uint16_t settle_ms = 2);
 
-    /**
-     * @brief (可选) 执行硬件复位脉冲
-     * @param cfg 包含 RESET 引脚信息的配置结构体
-     */
-    // void ad5941_hw_reset(const Ad5941GlueConfig& cfg);
+/** 读芯片 ID 做冒烟测试（需先调用 AD5940_Initialize 之前/之后都可读取） */
+uint32_t read_chip_id();
 
-} // namespace Ad5941BoardGlue
+/** 返回是否已绑定有效 SPI */
+bool ready();
+
+} // namespace Ad5941Glue
 
 #endif // AD5941_BOARD_GLUE_H
