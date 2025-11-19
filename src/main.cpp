@@ -26,35 +26,17 @@ static const int RESET_AD5941 = 26; // AD5941 复位引脚
 static const int CS_ADS124S08    = 16; // ADS124S08 片选引脚
 static const int RESET_ADS124S08 = 15; // ADS124S08 复位引脚
 static const int DRDY_ADS124S08 =  4; // ADS124S08 DRDY引脚
+// CHANNEL_MUX_ADDR1 复位引脚 GPIO-18
+// CHANNEL_MUX_ADDR0 复位引脚 GPIO-17
+// ISFET_MUX_ADDR2引脚 GPIO-25
+// ISFET_MUX_ADDR1引脚 GPIO-33
+// ISFET_MUX_ADDR0引脚 GPIO-32
 
 // 定义外部参考电压值，用于后续电压转换计算 请根据您实际连接到 REFP0/REFN0 的参考电压修改此值
 const double V_REF = 1.68; 
 
 // === 全局变量 ===
 uint32_t impDataBuffer[512]; // 用于存放阻抗数据
-// 扫频计数器
-uint32_t currentSweepPoint = 0;
-uint32_t totalSweepPoints = 0;
-unsigned long measureStartTime = 0; // 用于超时控制
-// === 状态机定义 ===
-enum SystemState {
-    STATE_IDLE,
-    STATE_MEASURE_TEMP,     // ADS124S08
-    STATE_MEASURE_IMP_SWEEP,// AD5941 阻抗扫频
-    STATE_MEASURE_PH,       // AD5941 pH (需要重配置AD5941)
-    STATE_MEASURE_CHLORINE, // AD5941 余氯 (需要重配置AD5941)
-    STATE_ERROR
-};
-
-enum ImpSweepSubState {
-    IMP_SUB_CONFIG,
-    IMP_SUB_INIT_HW,
-    IMP_SUB_TRIGGER,
-    IMP_SUB_WAIT_DATA,
-    IMP_SUB_DONE
-};
-SystemState mainState = STATE_IDLE;
-ImpSweepSubState impSubState = IMP_SUB_CONFIG;
 
 // 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* adc = nullptr;
@@ -65,16 +47,8 @@ TempService* g_tempSvc = nullptr;
 static bool cal_enabled = false;   // 默认不进校准流程
 // 可选：启动就想进校准可改为 true
 extern void handleCondCommand(const String& line); // 前置声明
-void runSystemStateMachine();
-/*
-static const int CHANNEL_MUX_ADDR0 =  17; // CHANNEL_MUX_ADDR0 复位引脚
-static const int CHANNEL_MUX_ADDR1 =  18; // CHANNEL_MUX_ADDR1 复位引脚
-*/
-/*
-static const int ISFET_MUX_ADDR0 =  32; // ISFET_MUX_ADDR0引脚
-static const int ISFET_MUX_ADDR1 =  33; // ISFET_MUX_ADDR1引脚
-static const int ISFET_MUX_ADDR2 =  25; // ISFET_MUX_ADDR2引脚
-*/
+
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -114,9 +88,7 @@ void setup() {
   AD5940PlatformCfg();
   Serial.println("System Initialized");
     
-  // 测试：启动进入扫频状态
-  mainState = STATE_MEASURE_IMP_SWEEP;
-  impSubState = IMP_SUB_CONFIG;
+  // 测试MUX控制
   ChooseSenesingChannel(1);
   ChooseISFETChannel(2);
 }
