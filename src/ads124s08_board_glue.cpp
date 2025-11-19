@@ -1,6 +1,17 @@
 #include "ads124s08_board_glue.h"
 #include "ads124s08_drv.h"
-// ---- 私有：保存 ADS 的板级状态，让回调能访问 ----
+// ---- 私有：保存 ADS124S08 的板级状态，让回调能访问 ----
+/*
+
+g (全局结构体) 
+  ↓
+g_ads.spi (指向SpiDevice的指针)
+  ↓
+g_ads.spi->beginTxn() (调用SpiDevice的成员函数)
+  ↓
+SPI.beginTransaction(settings) (最终调用Arduino SPI库)
+
+*/
 namespace {
   struct AdsState {
     const SpiDevice* dev = nullptr;

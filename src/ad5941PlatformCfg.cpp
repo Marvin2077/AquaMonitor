@@ -1,6 +1,7 @@
-#include "ad5940PlatformCfg.h"
+#include "ad5941PlatformCfg.h"
 
-int32_t AD5940PlatformCfg(void)
+
+AD5940Err AD5941PlatformCfg(void)
 {
   CLKCfg_Type clk_cfg;     // 时钟配置结构体
   FIFOCfg_Type fifo_cfg;   // FIFO 配置结构体
@@ -53,5 +54,5 @@ int32_t AD5940PlatformCfg(void)
   AD5940_AGPIOCfg(&gpio_cfg);                    // 应用 GPIO 配置
 
   AD5940_SleepKeyCtrlS(SLPKEY_UNLOCK);  /* 写入解锁密钥，允许 AFE (模拟前端) 进入睡眠模式 */
-  return 0;
+  return AD5940ERR_OK;
 }
