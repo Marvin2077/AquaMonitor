@@ -32,9 +32,6 @@ static const int DRDY_ADS124S08 =  4; // ADS124S08 DRDY引脚
 // ISFET_MUX_ADDR1引脚 GPIO-33
 // ISFET_MUX_ADDR0引脚 GPIO-32
 
-// 定义外部参考电压值，用于后续电压转换计算 请根据您实际连接到 REFP0/REFN0 的参考电压修改此值
-const double V_REF = 1.68; 
-
 // === 全局变量 ===
 uint32_t impDataBuffer[512]; // 用于存放阻抗数据
 
@@ -42,11 +39,9 @@ uint32_t impDataBuffer[512]; // 用于存放阻抗数据
 ADS124S08_Drv* ads124s08 = nullptr;
 //创建 Temp Service 对象指针
 TempService* g_tempSvc = nullptr;
+const double MY_RREF = 3300.0;
 
-// === Calibration control ===
-static bool cal_enabled = false;   // 默认不进校准流程
-// 可选：启动就想进校准可改为 true
-extern void handleCondCommand(const String& line); // 前置声明
+
 
 
 void setup() {
@@ -114,14 +109,15 @@ void setup() {
     Serial.println("!!! ADS124S08 configuration FAILED! Halting. !!!");
     while (1) { delay(1000); }
   }
+  // 3. 初始化 TempService (Service层)
+  TempService::Config tsCfg;
+  tsCfg.Rref_ohm = MY_RREF; 
+  tsCfg.pga_gain = 2;       // 必须与 defaultConfig 里的设置一致！
+  g_tempSvc = new TempService(*ads124s08, tsCfg);
   Serial.println("ADS124S08 configuration successful.");
-
-  Serial.println("ADC started. Waiting for data...");
-  Serial.println("----------------------------------------");
   // --- 完成ADS124S08的初始化 --- //
   //完成芯片初始化
   Serial.println("System Initialized");
-    
   // 测试MUX控制
   ChooseSenesingChannel(1);
   ChooseISFETChannel(2);
@@ -129,7 +125,27 @@ void setup() {
 
 
 void loop() {
+// 每秒测一次温度
+  static uint32_t last_time = 0;
+  // 2. 定时测量任务：这一步每 1000ms 才运行一次
+  if (millis() - last_time > 1000) {
+    last_time = millis();
 
+    double currentTemp = 0.0;
+    // 调用 Service 的 measure 接口
+    if (g_tempSvc->measure(currentTemp)) {
+      Serial.print("Water Temp: ");
+      Serial.print(currentTemp, 3); // 打印3位小数
+      Serial.println(" C");
+      
+      // 如果你想看电阻值用于调试：
+      double res = 0;
+      g_tempSvc->readResistance(res);
+      Serial.printf("  (Res: %.2f Ohm)\n", res);
+    } else {
+      Serial.println("Temp Read Failed! (Check Sensor)");
+    }
+  }
 
 }
 

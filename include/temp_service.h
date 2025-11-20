@@ -1,59 +1,69 @@
 #pragma once
-#include <Arduino.h>
+#include "Arduino.h"
 #include "ads124s08_drv.h"
 
-class TempService {
+class TempService
+{
 public:
-  struct Config {
-    double Rref_ohm = 1000.0;   // 参考电阻
-    int    pga_gain = 2;        // 你在 ADS124S08 上设定的 PGA 增益
+  struct Config
+  {
+    double Rref_ohm = 3300.0;
+    int pga_gain = 2;
   };
-
-  explicit TempService(ADS124S08_Drv& adc, const Config& cfg)
-  : adc_(adc), cfg_(cfg) {}
-
-  // 读一次温度（摄氏度）
-  bool readPT1000Once(double& tempC, double* Rrx_out = nullptr);
-
-  // 将 24 位码值 -> Rx(Ω)
-  double codeToRx(int32_t code24) const;
-
-  // 将 Rx(Ω) -> T(°C)
-  static double pt1000_R_to_T(double R);
-
-  struct CalibPoint {
-    double t_true;   // 已知“真实”温度（例如冰水=0.0，恒温槽=25.0、50.0）
-    double t_meas;   // 通过 readPT1000Once() 多次均值测到的“原始”温度
+    // ================= 校准相关结构体 =================
+  struct CalibPoint
+  {
+    double t_true;
+    double t_meas;
   };
-  struct CalibCoeff {
-    // 二次多项式系数: T_true = a*T_meas^2 + b*T_meas + c
-    double a = 0.0, b = 1.0, c = 0.0;
+  struct CalibCoeff
+  {
+    double a = 0.0;
+    double b = 1.0;
+    double c = 0.0;    // ax^2 + bx + c
+
     bool   valid = false;
   };
+  explicit TempService(ADS124S08_Drv& adc, const Config& cfg);
+  /**
+   * @brief 执行一次完整的测量流程
+   * 步骤：等待数据 -> 读取 -> 转电阻 -> 硬件检查 -> 转温度 -> 应用校准
+   * @param out_temp 输出最终校准后的温度
+   * @return true 成功, false 失败(超时/断线/短路)
+   */
+  bool measure(double& out_temp);
+  // ================= 工具/调试 API =================
+  // 仅读取原始电阻值 (用于调试或校准采集)
+  bool readResistance(double& out_ohm);
+  // 将 24 位 ADC 码值转换为电阻 (比率测量法)
+  double codeToResistance(int32_t code24) const;
+  // PT1000 核心算法：电阻 -> 温度 (Callendar-Van Dusen)
+  static double resistanceToTemp(double R);
 
-  // 采样若干次取均值，得到某一校准点的 t_meas
-  bool collectCalibPoint(double t_true, int samples, CalibPoint& out);
+  // === 分步校准 API ===
+  // 第1步：测量并记录某一个校准点 (index: 0, 1, 2)
+  // true_temp: 你当前水温的真实值 (比如 0.0, 50.0)
+  bool recordCalibPoint(int index, double true_temp);
+  bool fitThreePoint(const CalibPoint& p1,const CalibPoint& p2,const CalibPoint& p3,CalibCoeff& coeff);
+  // 第2步：当三个点都测完后，调用这个函数计算 a, b, c 并生效
+  bool finishCalibration();
 
-  // 用三个点拟合二次多项式（稳妥消除微小非线性）
-  static bool fitThreePoint(const CalibPoint& p1,
-                            const CalibPoint& p2,
-                            const CalibPoint& p3,
-                            CalibCoeff& coeff);
+  void setCalib(const CalibCoeff& input_data)
+  //函数声明写的是 setCalib(const CalibCoeff& ...)，那么你传进来的必须是 CalibCoeff
+  {
+    calib_ = input_data;
+  }
+CalibCoeff getCalib() const 
+{
+  return calib_;
+}
 
-  // 整体流程：依次采集三点、拟合系数并保存
-  bool runThreePointCalibration(double t1_true, double t2_true, double t3_true,
-                                int samples_each, CalibCoeff& out);
-
-  // 应用校准：把 readPT1000Once() 得到的 t_meas 转为校准后的温度
-  double applyCalib(double t_meas) const;
-
-  // 设置/查询系数（便于以后从NVS/EEPROM加载保存）
-  void setCalib(const CalibCoeff& c) { calib_ = c; }
-  CalibCoeff getCalib() const { return calib_; }
+double applyCalib(double t_meas) const;
 
 private:
   ADS124S08_Drv& adc_;
   Config cfg_;
   CalibCoeff calib_;
+  CalibPoint temp_points_[3];
 };
 

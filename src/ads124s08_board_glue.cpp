@@ -20,8 +20,14 @@ namespace {
   } g_ads;
 
   // 回调实现（驱动会调用这些）
-  void cs_assert()               { g_ads.dev->cs_low(); }
-  void cs_release()              { g_ads.dev->cs_high(); }
+  void cs_assert()               
+  {
+     g_ads.dev->cs_low(); 
+  }
+  void cs_release()              
+  { 
+      g_ads.dev->cs_high(); 
+  }
   bool spi_txrx(const uint8_t* tx, uint8_t* rx, size_t n) {
     g_ads.dev->beginTxn();
     g_ads.dev->transfer(tx, rx, n);

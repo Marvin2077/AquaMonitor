@@ -1,5 +1,5 @@
 #include "ads124s08_drv.h"
-
+#include "math.h"
 // ===== 内部工具 =====
 bool ADS124S08_Drv::sendCmd(uint8_t cmd) {
   if (!hal_.cs_assert || !hal_.cs_release || !hal_.spi_txrx) return false;
@@ -213,3 +213,44 @@ Serial.println("--- Verification PASSED ---");
   // 9) 启动连续转换
   return start();
 }
+
+bool ADS124S08_Drv::readPT1000Temperature(float r_ref, float& temperature)
+{
+  // 1. 等待数据就绪 (DRDY)
+  // 20SPS 模式下，数据周期是 50ms，我们设置 60ms 超时防止死锁
+  int32_t raw_signed = 0;
+  if(!waitDRDY(60))
+  {
+    return false;
+  }
+  // 2. 读取 24位原始数据
+  if(!readData(raw_signed))
+  {
+    return false;
+  }
+  // 3. 转换为电阻值 (比率测量法)
+  const int gain = 2;
+  const int FS = 8388608.0; // 2^23
+  // 根据公式反推电阻值
+  // R_RTD = R_REF * (Output Code) / (Gain * 2^23)
+  //       = (R_REF / Gain) * (Output Code / 2^23)
+  //       = (V_REF / IDAC / Gain) * (Output Code / 2^23)
+  // 注意: voltage = V_REF * (Output Code / (Gain * 2^23))
+  // 所以: R_RTD = voltage * R_REF / V_REF = voltage / IDAC
+  //计算当前测到的电压，占参考电压的百分比。
+  double ratio = (double)raw_signed/FS;
+  double r_rtd = ratio * r_ref/(double)gain;
+  // --- 简单的异常过滤 ---
+  // PT1000 在 -50度是 803欧，在 200度是 1758欧。
+  // 如果算出来是 0 或者无穷大，说明断路或短路。
+  if(r_rtd <100.0 || r_rtd>5000)
+  {
+    return false;
+  }
+
+  
+
+
+
+}
+

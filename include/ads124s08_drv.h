@@ -104,7 +104,8 @@ struct Hal {
 
   // 默认配置（示例：差分 AIN0-AIN1、内部2.5V参考、20SPS、连续）
   bool defaultConfig();
-
+  // PT1000测温
+  bool readPT1000Temperature(float r_ref, float& temperature);
   // 工具：24 位补码 → int32
   static inline int32_t signExtend24(uint32_t raw24) {
     return (raw24 & 0x800000) ? int32_t(raw24 | 0xFF000000) : int32_t(raw24 & 0x00FFFFFF);
