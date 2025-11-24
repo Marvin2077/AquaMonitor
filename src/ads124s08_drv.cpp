@@ -168,9 +168,6 @@ bool ADS124S08_Drv::defaultConfig() {
     if (!writeRegisters(static_cast<uint8_t>(Reg::SYS), &sys, 1)) return false;
   }
 
-  // 7) 可选：偏置/烧断电流/监测 等保持默认
-  // VBIAS 关闭；Burnout 检测关闭；避免影响测量。
-
   // 8) 写后读回校验（已为您实现打印功能）
 Serial.println("--- Verifying Register Settings ---"); // 打印一个标题，方便查看
 struct { Reg r; const char* name; } toCheck[] = {

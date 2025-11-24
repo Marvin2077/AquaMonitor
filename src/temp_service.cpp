@@ -3,10 +3,7 @@
 #include "Arduino.h"
 //构造函数的成员初始化列表
 TempService :: TempService(ADS124S08_Drv& adc, const Config& cfg) : adc_(adc),cfg_(cfg){}
-//TempService (类的名字)::(的) TempService(函数的名字)
-// ':' 它的意思是：“在进入大括号 {} 执行任何代码之前，先立刻把下面这些变量填好。”
-// 传入 adc 是类ADS124S08_Drv的实例的引用 传入cfg 是 Config 这个结构体的一个实例的引用。
-// 构造函数在使用关键字 new 或者声明变量时自动触发的 如 g_tempSvc = new TempService(*ads124s08, tsCfg);
+
 // --- 工具函数 ---
 // --- 数学工具：解 3x3 线性方程组 (高斯消元) ---
 // 这是一个文件内部的静态辅助函数，不需要在头文件声明
@@ -63,7 +60,7 @@ double TempService::codeToResistance(int32_t code24) const{
   // 这里的逻辑：Ratio = Code / FS
   // R_RTD = Ratio * R_REF / Gain
   double ratio = static_cast<double>(code24) /FS;
-  Serial.printf("ratio: %.2f %\n", ratio*1000);
+  //Serial.printf("ratio: %.2f %\n", ratio*1000);
   //“静态类型转换” static_cast转换操作的名字 <double>目标类型 (code24)被转换的对象
   //code24是 int32_t (整数),需要改成浮点数避免小数部分被切掉
   double res = ratio * cfg_.Rref_ohm / static_cast<double>(cfg_.pga_gain);
@@ -159,42 +156,61 @@ double TempService::applyCalib(double t_meas) const
   }
 }
 // 记录单点校准数据
-bool TempService::recordCalibPoint(int index, double true_temp) {
-  if (index < 0 || index > 2) return false;
-
-  // 1. 连续读 10 次取平均，减少噪声干扰
+bool TempService::recordCalibPoint(int index, double true_temp)
+{
+  //判断索引是否溢出
+  if(index<0||index>2)
+  {
+    return false;
+  }
   double sum_meas = 0.0;
   int count = 0;
-  for (int i = 0; i < 10; i++) {
+  for(int i = 0; i < 10; i++)
+  {
     double r_meas = 0.0;
-    // 这里的 false 表示不使用校准，我们要存的是“原始值”！
-    if (readResistance(r_meas)) { 
-       double t_raw = resistanceToTemp(r_meas); // 只转温度，不应用 applyCalib
-       sum_meas += t_raw;
-       count++;
+    if(readResistance(r_meas))
+    {
+      double t_raw = resistanceToTemp(r_meas);
+      sum_meas += t_raw;
+      count++;
     }
-    delay(50); // 稍微间隔一下
+    delay(50);
+
   }
-
-  if (count == 0) return false; // 读失败了
-
-  // 2. 存入暂存区
-  temp_points_[index].t_true = true_temp;      // 真实值 (比如 0.0)
-  temp_points_[index].t_meas = sum_meas / count; // 测量值 (比如 0.5)
-  
+  if(count == 0)
+  {
+    return false;
+  }
+  temp_points_[index].t_true = true_temp;
+  temp_points_[index].t_meas = sum_meas/count;
+  temp_points_[index].recorded = true;
   return true;
-}
-
-// 完成校准计算
-bool TempService::finishCalibration() {
-  CalibCoeff new_coeffs;
   
-  // 利用你现有的 fitThreePoint 函数进行数学拟合
-  if (fitThreePoint(temp_points_[0], temp_points_[1], temp_points_[2], new_coeffs)) {
-    // 拟合成功，更新系数
+}
+// 完成校准计算
+bool TempService::finishCalibration()
+{
+  if (!temp_points_[0].recorded || 
+      !temp_points_[1].recorded || 
+      !temp_points_[2].recorded) {
+      // 如果任何一个点没记录，或者数据不全
+      return false; 
+  }
+  // 如果三个点的测量值太接近，矩阵也会无解，需要拦截
+  if (fabs(temp_points_[0].t_meas - temp_points_[1].t_meas) < 0.1 ||
+      fabs(temp_points_[1].t_meas - temp_points_[2].t_meas) < 0.1) {
+      return false;
+  }
+  CalibCoeff new_coeffs;
+
+  if(fitThreePoint(temp_points_[0],temp_points_[1],temp_points_[2],new_coeffs))
+  {
     calib_ = new_coeffs;
-    calib_.valid = true; 
+    calib_.valid = true;
+    temp_points_[0].recorded = false;
     return true;
   }
   return false;
+
+
 }

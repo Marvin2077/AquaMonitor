@@ -76,7 +76,7 @@ typedef struct {
 #define IMPCTRL_GETFREQ 3
 #define IMPCTRL_SHUTDOWN 4
 
-int32_t AppInit(uint32_t *pBuffer, uint32_t BufferSize);
+//int32_t AppInit(uint32_t *pBuffer, uint32_t BufferSize);
 int32_t AppIMPGetCfg(void *pCfg);
 int32_t AppIMPISR(void *pBuff, uint32_t *pCount);
 int32_t AppIMPCtrl(uint32_t Command, void *pPara);

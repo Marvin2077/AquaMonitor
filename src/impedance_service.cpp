@@ -14,26 +14,26 @@ AD5940Err AppIMPCfg_init(){
     AppIMPCfg.SeqStartADDrcal = 0;
     AppIMPCfg.MaxSeqLenCal = 0;
     //配置系统与测量频率
-    AppIMPCfg.ImpODR = 20.0;
+    AppIMPCfg.ImpODR = 5.0;
     AppIMPCfg.NumOfData = -1;
-    AppIMPCfg.SysClkFreq = 16000000.0;
+    AppIMPCfg.SysClkFreq = 32000000.0;
     AppIMPCfg.WuptClkFreq = 32000.0;
-    AppIMPCfg.AdcClkFreq = 16000000.0;
+    AppIMPCfg.AdcClkFreq = 32000000.0;
     AppIMPCfg.RcalVal = 1000.0; //Ohm
     //配置开关矩阵
     AppIMPCfg.DswitchSel = SWD_CE0;
     AppIMPCfg.PswitchSel = SWP_CE0;
-    AppIMPCfg.NswitchSel = SWN_AIN1;
-    AppIMPCfg.TswitchSel = SWT_AIN1;
+    AppIMPCfg.NswitchSel = SWN_AIN0;
+    AppIMPCfg.TswitchSel = SWT_AIN0;
     
     AppIMPCfg.PwrMod = AFEPWR_HP;
     //HSTIA Configuration
-    AppIMPCfg.HstiaRtiaSel = HSTIARTIA_5K;
+    AppIMPCfg.HstiaRtiaSel = HSTIARTIA_1K;
     AppIMPCfg.ExcitBufGain = EXCITBUFGAIN_2;
     // HSDAC Configuration
     AppIMPCfg.HsDacGain = HSDACGAIN_1;
     AppIMPCfg.HsDacUpdateRate = 7;
-    AppIMPCfg.DacVoltPP = 800.0;
+    AppIMPCfg.DacVoltPP = 600.0;
     AppIMPCfg.BiasVolt = -0.0f;
 
     // DFT configuration
@@ -47,11 +47,11 @@ AD5940Err AppIMPCfg_init(){
     AppIMPCfg.ADCAvgNum = ADCAVGNUM_16;
 
     // sweep freq configuration
-    AppIMPCfg.SinFreq = 100000.0;
-    AppIMPCfg.SweepCfg.SweepEn = bTRUE;
+    AppIMPCfg.SinFreq = 1000.0;
+    AppIMPCfg.SweepCfg.SweepEn = bFALSE;
     AppIMPCfg.SweepCfg.SweepStart = 1000;
-    AppIMPCfg.SweepCfg.SweepStop = 100000.0;
-    AppIMPCfg.SweepCfg.SweepPoints = 100;
+    AppIMPCfg.SweepCfg.SweepStop = 8500;
+    AppIMPCfg.SweepCfg.SweepPoints = 10;
     AppIMPCfg.SweepCfg.SweepLog = bFALSE;
     AppIMPCfg.SweepCfg.SweepIndex = 0;
 
@@ -121,7 +121,7 @@ int32_t AppIMPCtrl(uint32_t Command, void *pPara)
     }
     return AD5940ERR_OK;
 }
-
+//获取当前测量频率
 float AppIMPGetCurrFreq(void)
 {
     if(AppIMPCfg.SweepCfg.SweepEn == bTRUE)
@@ -235,7 +235,7 @@ static AD5940Err AppIMPSeqCfgGen(void)
     memset(&dsp_cfg.ADCDigCompCfg, 0, sizeof(dsp_cfg.ADCDigCompCfg));
 
     dsp_cfg.ADCFilterCfg.ADCAvgNum = AppIMPCfg.ADCAvgNum;
-    dsp_cfg.ADCFilterCfg.ADCRate = ADCRATE_800KHZ; /* Tell filter block clock rate of ADC*/
+    dsp_cfg.ADCFilterCfg.ADCRate = ADCRATE_1P6MHZ; /* Tell filter block clock rate of ADC*/
     dsp_cfg.ADCFilterCfg.ADCSinc2Osr = AppIMPCfg.ADCSinc2Osr;
     dsp_cfg.ADCFilterCfg.ADCSinc3Osr = AppIMPCfg.ADCSinc3Osr;
     dsp_cfg.ADCFilterCfg.BpNotch = bTRUE;
@@ -397,7 +397,7 @@ int32_t AppIMPInit(uint32_t *pBuffer, uint32_t BufferSize)
         if(pBuffer == 0) return AD5940ERR_PARA;
         if(BufferSize == 0) return AD5940ERR_PARA;
         AD5940_SEQGenInit(pBuffer, BufferSize);
-
+        Serial.printf("B");
         /*重新生成初始化序列*/
         error = AppIMPSeqCfgGen();
         if(error != AD5940ERR_OK) return error;
@@ -509,7 +509,7 @@ int32_t AppIMPISR(void *pBuff, uint32_t *pCount)
   {
     /* Now there should be 4 data in FIFO */
     FifoCnt = (AD5940_FIFOGetCnt()/4)*4;
-    
+    Serial.printf("A");
     if(FifoCnt > BuffCount)
     {
       ///@todo buffer is limited.
@@ -517,7 +517,6 @@ int32_t AppIMPISR(void *pBuff, uint32_t *pCount)
     AD5940_FIFORd((uint32_t *)pBuff, FifoCnt);
     AD5940_INTCClrFlag(AFEINTSRC_DATAFIFOTHRESH);
     AppIMPRegModify((int32_t *)pBuff, &FifoCnt);   /* If there is need to do AFE re-configure, do it here when AFE is in active state */
-    //AD5940_EnterSleepS(); /* Manually put AFE back to hibernate mode. This operation only takes effect when register value is ACTIVE previously */
     AD5940_SleepKeyCtrlS(SLPKEY_UNLOCK);  /* Allow AFE to enter sleep mode. */
     /* Process data */ 
     AppIMPDataProcess((int32_t*)pBuff,&FifoCnt); 
@@ -539,14 +538,14 @@ int32_t ImpedanceShowResult(uint32_t *pData, uint32_t DataCount)
   // 调用应用层控制函数，获取当前测量的频率 (IMPCTRL_GETFREQ)
   AppIMPCtrl(IMPCTRL_GETFREQ, &freq);
 
-  printf("Freq:%.2f ", freq); // 打印当前频率
+   Serial.printf("Freq:%.2f ", freq); // 打印当前频率
 
   /* 处理数据 */
   for(int i=0;i<DataCount;i++)
   {
     // 打印每个数据点的阻抗幅值 (Magnitude) 和相位 (Phase)
     // 相位数据原始单位是弧度 (Radian)，这里乘以 180/MATH_PI 转换为角度 (Degree)
-    printf("RzMag: %f Ohm , RzPhase: %f \n",pImp[i].Magnitude,pImp[i].Phase*180/MATH_PI);
+    Serial.printf("RzMag: %f Ohm , RzPhase: %f \n",pImp[i].Magnitude,pImp[i].Phase*180/MATH_PI);
   }
   return 0;
 }

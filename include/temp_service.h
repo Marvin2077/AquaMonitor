@@ -15,6 +15,7 @@ public:
   {
     double t_true;
     double t_meas;
+    bool   recorded = false;
   };
   struct CalibCoeff
   {

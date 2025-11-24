@@ -19,7 +19,7 @@ AD5940Err AD5941PlatformCfg(void)
   clk_cfg.ADCCLkSrc = ADCCLKSRC_HFOSC;    // ADC 时钟源：高频振荡器 (HFOSC, 16MHz或32MHz)
   clk_cfg.SysClkDiv = SYSCLKDIV_1;        // 系统时钟分频：1分频
   clk_cfg.SysClkSrc = SYSCLKSRC_HFOSC;    // 系统时钟源：高频振荡器 (HFOSC)
-  clk_cfg.HfOSC32MHzMode = bFALSE;        // HFOSC 32MHz 模式：关闭 (即使用 16MHz)
+  clk_cfg.HfOSC32MHzMode = bTRUE;        // HFOSC 32MHz 模式：关闭 (即使用 16MHz)
   clk_cfg.HFOSCEn = bTRUE;                // 使能高频振荡器
   clk_cfg.HFXTALEn = bFALSE;              // 禁能高频晶体 (HFXTAL)
   clk_cfg.LFOSCEn = bTRUE;                // 使能低频振荡器 (LFOSC, 32kHz)，用于看门狗和睡眠定时器
