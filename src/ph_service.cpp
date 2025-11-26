@@ -179,7 +179,7 @@ AD5940Err AppPHSeqCfgGen(void)
 
   AD5940_StructInit(&adc_filter,sizeof(adc_filter));
   adc_filter.ADCAvgNum = ADCAVGNUM_16;
-  adc_filter.ADCRate = ADCRATE_800KHZ;
+  adc_filter.ADCRate = ADCRATE_1P6MHZ;
   adc_filter.ADCSinc2Osr = ADCSINC2OSR_22;
   adc_filter.ADCSinc3Osr = ADCSINC3OSR_4;
   adc_filter.BpSinc3 = bFALSE;
@@ -226,7 +226,7 @@ AD5940Err AppPHSeqMeasureGen(void)
   clks_cal.ADCAvgNum = ADCAVGNUM_16;
   clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;;
   AD5940_ClksCalculate(&clks_cal,&WaitClks);
-  WaitClks += 20;
+  WaitClks = (WaitClks * 2) + 1000;
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
   // 1. 开启 ADC 转换
