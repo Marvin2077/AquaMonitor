@@ -184,14 +184,14 @@ AD5940Err AppPHSeqCfgGen(void)
   adc_filter.ADCSinc3Osr = ADCSINC3OSR_4;
   adc_filter.BpSinc3 = bFALSE;
   adc_filter.BpNotch = bTRUE;
-  adc_filter.Sinc2NotchEnable = bFALSE;
+  adc_filter.Sinc2NotchEnable = bTRUE;
   AD5940_ADCFilterCfgS(&adc_filter);
   
 
 
 
   AD5940_AFECtrlS(AFECTRL_HPREFPWR|AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
-    AFECTRL_DACREFPWR, bTRUE);
+    AFECTRL_DACREFPWR|AFECTRL_SINC2NOTCH, bTRUE);
 
 
   AD5940_SEQGenInsert(SEQ_STOP());
