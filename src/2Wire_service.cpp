@@ -1,68 +1,59 @@
 #include "2Wire_Service.h"
 #include "Arduino.h"
-/**
-* @note 本示例由 BIOZ 例程修改而来，面向**两线阻抗测量**。
-* 默认使用的引脚为 **CE0** 和 **AIN2**。
-* 与原 BIOZ 的不同之处在于：将“人体电压测量”替换为“**激励电压测量**”，且该电压**只测量一次**。
-*/
 
-/* 应用程序配置结构体。由用户根据模板指定。
-这些变量在整个应用程序中都可用。
-它包含序列发生器的基本配置和应用相关参数
-*/
 AppBIOZCfg_Type AppBIOZCfg;
 
 AD5940Err AppBIOZCfg_init(){
 
-AppBIOZCfg.bParaChanged = bFALSE;
-AppBIOZCfg.SeqStartAddr = 0;
-AppBIOZCfg.MaxSeqLen = 512;
-AppBIOZCfg.SeqStartAddrCal = 0;
-AppBIOZCfg.MaxSeqLenCal = 0;
+    AppBIOZCfg.bParaChanged = bFALSE;
+    AppBIOZCfg.SeqStartAddr = 0;
+    AppBIOZCfg.MaxSeqLen = 512;
+    AppBIOZCfg.SeqStartAddrCal = 0;
+    AppBIOZCfg.MaxSeqLenCal = 0;
 
-AppBIOZCfg.ReDoRtiaCal = bFALSE;
-AppBIOZCfg.SysClkFreq = 16000000.0;
-AppBIOZCfg.WuptClkFreq = 32000.0;
-AppBIOZCfg.AdcClkFreq = 16000000.0;
-AppBIOZCfg.BIOZODR = 20.0; /* 20.0 赫兹 */
-AppBIOZCfg.NumOfData = -1;
-AppBIOZCfg.RcalVal = 1000.0; /* 10k 欧姆 */
+    AppBIOZCfg.ReDoRtiaCal = bFALSE;
+    AppBIOZCfg.SysClkFreq = 16000000.0;
+    AppBIOZCfg.WuptClkFreq = 32000.0;
+    AppBIOZCfg.AdcClkFreq = 16000000.0;
+    AppBIOZCfg.BIOZODR = 20.0; /* 20.0 赫兹 */
+    AppBIOZCfg.NumOfData = -1;
+    AppBIOZCfg.RcalVal = 1000.0; /* 10k 欧姆 */
 
-AppBIOZCfg.PwrMod = AFEPWR_LP;
-AppBIOZCfg.HstiaRtiaSel = HSTIARTIA_1K;
-AppBIOZCfg.CtiaSel = 16;
-AppBIOZCfg.ExcitBufGain = EXCITBUFGAIN_2;
-AppBIOZCfg.HsDacGain = HSDACGAIN_1;
-AppBIOZCfg.HsDacUpdateRate = 7;
-AppBIOZCfg.DacVoltPP = 600.0;
+    AppBIOZCfg.PwrMod = AFEPWR_LP;
+    AppBIOZCfg.HstiaRtiaSel = HSTIARTIA_1K;
+    AppBIOZCfg.CtiaSel = 16;
+    AppBIOZCfg.ExcitBufGain = EXCITBUFGAIN_2;
+    AppBIOZCfg.HsDacGain = HSDACGAIN_1;
+    AppBIOZCfg.HsDacUpdateRate = 7;
+    AppBIOZCfg.DacVoltPP = 600.0;
 
-AppBIOZCfg.SinFreq = 50000.0; /* 50000 赫兹 */
+    AppBIOZCfg.SinFreq = 50000.0; /* 50000 赫兹 */
 
-AppBIOZCfg.ADCPgaGain = ADCPGA_1P5;
-AppBIOZCfg.ADCSinc3Osr = ADCSINC3OSR_2;
-AppBIOZCfg.ADCSinc2Osr = ADCSINC2OSR_22;
+    AppBIOZCfg.ADCPgaGain = ADCPGA_1P5;
+    AppBIOZCfg.ADCSinc3Osr = ADCSINC3OSR_2;
+    AppBIOZCfg.ADCSinc2Osr = ADCSINC2OSR_22;
 
-AppBIOZCfg.DftNum = DFTNUM_8192;
-AppBIOZCfg.DftSrc = DFTSRC_SINC3;
-AppBIOZCfg.HanWinEn = bTRUE;
+    AppBIOZCfg.DftNum = DFTNUM_8192;
+    AppBIOZCfg.DftSrc = DFTSRC_SINC3;
+    AppBIOZCfg.HanWinEn = bTRUE;
 
-AppBIOZCfg.DswitchSel = SWD_CE0;
-AppBIOZCfg.PswitchSel = SWP_CE0;
-AppBIOZCfg.NswitchSel = SWN_AIN0;
-AppBIOZCfg.TswitchSel = SWN_AIN0;
+    AppBIOZCfg.DswitchSel = SWD_CE0;
+    AppBIOZCfg.PswitchSel = SWP_CE0;
+    AppBIOZCfg.NswitchSel = SWN_AIN0;
+    AppBIOZCfg.TswitchSel = SWN_AIN0;
 
-AppBIOZCfg.SweepCfg.SweepEn = bFALSE;
-AppBIOZCfg.SweepCfg.SweepStart = 1000.0;
-AppBIOZCfg.SweepCfg.SweepStop = 10000.0;
-AppBIOZCfg.SweepCfg.SweepPoints = 10;
-AppBIOZCfg.SweepCfg.SweepLog = bFALSE;
-AppBIOZCfg.SweepCfg.SweepIndex = 0;
+    AppBIOZCfg.SweepCfg.SweepEn = bFALSE;
+    AppBIOZCfg.SweepCfg.SweepStart = 1000.0;
+    AppBIOZCfg.SweepCfg.SweepStop = 10000.0;
+    AppBIOZCfg.SweepCfg.SweepPoints = 10;
+    AppBIOZCfg.SweepCfg.SweepLog = bFALSE;
+    AppBIOZCfg.SweepCfg.SweepIndex = 0;
 
-AppBIOZCfg.FifoThresh = 4; /* 当 SweepEn = bTRUE 时必须为 4 */
-AppBIOZCfg.BIOZInited = bFALSE;
-AppBIOZCfg.StopRequired = bFALSE;
+    AppBIOZCfg.FifoThresh = 4; /* 当 SweepEn = bTRUE 时必须为 4 */
+    AppBIOZCfg.BIOZInited = bFALSE;
+    AppBIOZCfg.StopRequired = bFALSE;
 
-return AD5940ERR_OK;
+    return AD5940ERR_OK;
 }
 
 /**
@@ -167,6 +158,7 @@ static AD5940Err AppBIOZSeqCfgGen(void)
   aferef_cfg.LpRefBufEn = bTRUE;
   aferef_cfg.LpRefBoostEn = bFALSE;
   AD5940_REFCfgS(&aferef_cfg);
+  AD5940_StructInit(&hs_loop,sizeof(hs_loop));
   hs_loop.HsDacCfg.ExcitBufGain = AppBIOZCfg.ExcitBufGain;
   hs_loop.HsDacCfg.HsDacGain = AppBIOZCfg.HsDacGain;
   hs_loop.HsDacCfg.HsDacUpdateRate = AppBIOZCfg.HsDacUpdateRate;
@@ -181,7 +173,7 @@ static AD5940Err AppBIOZSeqCfgGen(void)
   hs_loop.SWMatCfg.Dswitch = SWD_OPEN;
   hs_loop.SWMatCfg.Pswitch = SWP_PL|SWP_PL2;
   hs_loop.SWMatCfg.Nswitch = SWN_NL|SWN_NL2;
-  hs_loop.SWMatCfg.Tswitch = SWT_TRTIA;
+  hs_loop.SWMatCfg.Tswitch = SWT_AIN1 |SWT_TRTIA;
 
   hs_loop.WgCfg.WgType = WGTYPE_SIN;
   hs_loop.WgCfg.GainCalEn = bFALSE;
@@ -205,6 +197,7 @@ static AD5940Err AppBIOZSeqCfgGen(void)
   hs_loop.WgCfg.SinCfg.SinPhaseWord = 0;
   AD5940_HSLoopCfgS(&hs_loop);
 
+  AD5940_StructInit(&dsp_cfg,sizeof(dsp_cfg));
   dsp_cfg.ADCBaseCfg.ADCMuxN = ADCMUXN_HSTIA_N;
   dsp_cfg.ADCBaseCfg.ADCMuxP = ADCMUXP_HSTIA_P;
   dsp_cfg.ADCBaseCfg.ADCPga = AppBIOZCfg.ADCPgaGain;
@@ -685,57 +678,57 @@ AD5940Err AppBIOZISR(void *pBuff, uint32_t *pCount)
   return 0;
 }
 
-int32_t AD5940PlatformCfg(void)
-{
-  CLKCfg_Type clk_cfg;
-  FIFOCfg_Type fifo_cfg;
-  AGPIOCfg_Type gpio_cfg;
+// int32_t AD5940PlatformCfg(void)
+// {
+//   CLKCfg_Type clk_cfg;
+//   FIFOCfg_Type fifo_cfg;
+//   AGPIOCfg_Type gpio_cfg;
 
-  /* 使用硬复位 (由您的glue层处理) */
-  AD5940_HWReset();
-  /* 平台配置 */
-  AD5940_Initialize();
-  /* Step1. 配置时钟 */
-  clk_cfg.ADCClkDiv = ADCCLKDIV_1;
-  clk_cfg.ADCCLkSrc = ADCCLKSRC_XTAL;
-  clk_cfg.SysClkDiv = SYSCLKDIV_1;
-  clk_cfg.SysClkSrc = SYSCLKSRC_XTAL;
-  clk_cfg.HfOSC32MHzMode = bFALSE;
-  clk_cfg.HFOSCEn = bFALSE;
-  clk_cfg.HFXTALEn = bTRUE;
-  clk_cfg.LFOSCEn = bTRUE;
-  AD5940_CLKCfg(&clk_cfg);
-  //该部分使能外部时钟源，并禁能内部时钟源。系统和ADC时钟分频系数设为1，即不分频
-  //并使能内部32KHz时钟源为唤醒/睡眠模块提供时钟信号。
-  /* Step2. 配置FIFO */
-  fifo_cfg.FIFOEn = bFALSE;
-  fifo_cfg.FIFOMode = FIFOMODE_FIFO;
-  fifo_cfg.FIFOSize = FIFOSIZE_4KB;
-  fifo_cfg.FIFOSrc = FIFOSRC_DFT;
-  fifo_cfg.FIFOThresh = 4; // 1次测量 = 1x I + 1x V = 4个数据 (I_real, I_imag, V_real, V_imag)
-  AD5940_FIFOCfg(&fifo_cfg);
-  fifo_cfg.FIFOEn = bTRUE;  
-  AD5940_FIFOCfg(&fifo_cfg);
+//   /* 使用硬复位 (由您的glue层处理) */
+//   AD5940_HWReset();
+//   /* 平台配置 */
+//   AD5940_Initialize();
+//   /* Step1. 配置时钟 */
+//   clk_cfg.ADCClkDiv = ADCCLKDIV_1;
+//   clk_cfg.ADCCLkSrc = ADCCLKSRC_XTAL;
+//   clk_cfg.SysClkDiv = SYSCLKDIV_1;
+//   clk_cfg.SysClkSrc = SYSCLKSRC_XTAL;
+//   clk_cfg.HfOSC32MHzMode = bFALSE;
+//   clk_cfg.HFOSCEn = bFALSE;
+//   clk_cfg.HFXTALEn = bTRUE;
+//   clk_cfg.LFOSCEn = bTRUE;
+//   AD5940_CLKCfg(&clk_cfg);
+//   //该部分使能外部时钟源，并禁能内部时钟源。系统和ADC时钟分频系数设为1，即不分频
+//   //并使能内部32KHz时钟源为唤醒/睡眠模块提供时钟信号。
+//   /* Step2. 配置FIFO */
+//   fifo_cfg.FIFOEn = bFALSE;
+//   fifo_cfg.FIFOMode = FIFOMODE_FIFO;
+//   fifo_cfg.FIFOSize = FIFOSIZE_4KB;
+//   fifo_cfg.FIFOSrc = FIFOSRC_DFT;
+//   fifo_cfg.FIFOThresh = 4; // 1次测量 = 1x I + 1x V = 4个数据 (I_real, I_imag, V_real, V_imag)
+//   AD5940_FIFOCfg(&fifo_cfg);
+//   fifo_cfg.FIFOEn = bTRUE;  
+//   AD5940_FIFOCfg(&fifo_cfg);
   
-  /* Step3. 中断控制器 */
-  // 使能所有中断标志位，以便我们可以轮询它们
-  AD5940_INTCCfg(AFEINTC_1, AFEINTSRC_ALLINT, bTRUE); 
-  // 使能FIFO阈值标志位
-  AD5940_INTCCfg(AFEINTC_0, AFEINTSRC_DATAFIFOTHRESH, bTRUE); 
-  AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
+//   /* Step3. 中断控制器 */
+//   // 使能所有中断标志位，以便我们可以轮询它们
+//   AD5940_INTCCfg(AFEINTC_1, AFEINTSRC_ALLINT, bTRUE); 
+//   // 使能FIFO阈值标志位
+//   AD5940_INTCCfg(AFEINTC_0, AFEINTSRC_DATAFIFOTHRESH, bTRUE); 
+//   AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
 
-  /* Step4: GPIO配置 (不再需要中断引脚) */
-  gpio_cfg.FuncSet = GP6_SYNC|GP5_SYNC|GP4_SYNC|GP2_TRIG|GP1_SYNC; // 移除了GP0_INT
-  gpio_cfg.InputEnSet = AGPIO_Pin2;
-  gpio_cfg.OutputEnSet = AGPIO_Pin1|AGPIO_Pin4|AGPIO_Pin5|AGPIO_Pin6; // 移除了AGPIO_Pin0
-  gpio_cfg.OutVal = 0;
-  gpio_cfg.PullEnSet = 0;
+//   /* Step4: GPIO配置 (不再需要中断引脚) */
+//   gpio_cfg.FuncSet = GP6_SYNC|GP5_SYNC|GP4_SYNC|GP2_TRIG|GP1_SYNC; // 移除了GP0_INT
+//   gpio_cfg.InputEnSet = AGPIO_Pin2;
+//   gpio_cfg.OutputEnSet = AGPIO_Pin1|AGPIO_Pin4|AGPIO_Pin5|AGPIO_Pin6; // 移除了AGPIO_Pin0
+//   gpio_cfg.OutVal = 0;
+//   gpio_cfg.PullEnSet = 0;
 
-  //AD5940_AGPIOCfg(&gpio_cfg);
+//   //AD5940_AGPIOCfg(&gpio_cfg);
 
-  AD5940_SleepKeyCtrlS(SLPKEY_UNLOCK); 
-  return 0;
-}
+//   AD5940_SleepKeyCtrlS(SLPKEY_UNLOCK); 
+//   return 0;
+// }
 
 
 

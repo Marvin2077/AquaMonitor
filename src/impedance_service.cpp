@@ -397,7 +397,6 @@ int32_t AppIMPInit(uint32_t *pBuffer, uint32_t BufferSize)
         if(pBuffer == 0) return AD5940ERR_PARA;
         if(BufferSize == 0) return AD5940ERR_PARA;
         AD5940_SEQGenInit(pBuffer, BufferSize);
-        Serial.printf("B");
         /*重新生成初始化序列*/
         error = AppIMPSeqCfgGen();
         if(error != AD5940ERR_OK) return error;

@@ -2,6 +2,8 @@
 #include <SPI.h>
 
 //所有驱动层头文件
+#include "storage_manager.h"
+#include "mux_iface.h"
 #include "spi_hal.h"        // 底层硬件操作
 #include "ads124s08_board_glue.h"     // 胶水层
 #include "ads124s08_drv.h"  // 通用驱动层
@@ -10,8 +12,7 @@
 #include "temp_service.h" 
 #include "impedance_service.h" 
 #include "2Wire_service.h"
-#include "storage_manager.h"
-#include "mux_iface.h"
+#include "ph_service.h"
 extern "C" {
 #include "ad5940.h"
 }
@@ -27,7 +28,7 @@ static const int RESET_AD5941 = 26; // AD5941 复位引脚
 static const int CS_ADS124S08    = 16; // ADS124S08 片选引脚
 static const int RESET_ADS124S08 = 15; // ADS124S08 复位引脚
 static const int DRDY_ADS124S08 =  4; // ADS124S08 DRDY引脚
-/* ====== 设备ID ====== */
+/* ====== Deafult设备ID ====== */
 int Deviceid = -1;
 //解析串口命令函数
 void handleSerialCommand();
@@ -43,6 +44,8 @@ extern AppIMPCfg_Type AppIMPCfg;
 bool g_isSweepMode = false;
 int g_sweepCount = 0;     // 当前已测量的点数
 int g_sweepTotalPoints = 0; // 总共要测的点数
+// ===pH 服务标志位
+bool g_isPhMode = false;
 // === ADS124S08 全局变量 ===
 // 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* ads124s08 = nullptr;
@@ -83,7 +86,7 @@ void setup() {
   static SpiDevice ad5941_spidev(CS_AD5941, 8000000 /* 8MHz */, MSBFIRST, SPI_MODE0);
   Serial.println("SpiDevice for AD5941 created.");
 
-  // 2) 配置并初始化 Ad5941 Glue 层
+  // 2) 配置并初始化 AD5941 Glue 层
   Ad5941Glue::Config cfg;
   cfg.spi = &ad5941_spidev;
   cfg.pin_reset = RESET_AD5941;
@@ -128,33 +131,30 @@ void setup() {
   g_tempSvc = new TempService(*ads124s08, tsCfg);
   Serial.println("ADS124S08 configuration successful.");
   // --- 初始化 AD5941 阻抗测量服务 --- //
-  Serial.println("Initializing Impedance Service...");
+  //Serial.println("Initializing Impedance Service...");
   //初始化应用参数结构体
-  AppBIOZCfg_init();
-  // 5. 配置2线应用参数 (修改Rcal和AIN1)
-  Serial.println("Running RTIA Calibration... This may take a moment.");
-  if(AppBIOZInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-    Serial.println("BIOZ_Impedance Service Init OK!");
-  }
-  else {
-        Serial.println("BIOZ_Impedance Service Init FAILED!");
-    }
-  /*
-  // 1. 加载默认配置
-  AppIMPCfg_init();
   //AppBIOZCfg_init();
-  // 2. 初始化服务 (生成序列并写入 AD5941 SRAM)
-    // 这步很重要，它会生成初始化序列和测量序列
-    if (AppIMPInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-        Serial.println("Impedance Service Init OK!");
-    } else {
-        Serial.println("Impedance Service Init FAILED!");
+  AppPHCfg_init();
+  // 5. 配置2线应用参数 (修改Rcal和AIN1)
+  if(AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+    Serial.println("pH Service Init OK!");
+  }
+  else 
+    {
+        Serial.println("pH Service Init FAILED!");
     }
-  */
+  // Serial.println("Running RTIA Calibration... This may take a moment.");
+  // if(AppBIOZInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+  //   Serial.println("BIOZ_Impedance Service Init OK!");
+  // }
+  // else 
+  //   {
+  //       Serial.println("BIOZ_Impedance Service Init FAILED!");
+  //   }
   //完成芯片和服务初始化
   Serial.println("System Initialized");
   // 测试MUX控制
-  ChooseSenesingChannel(1);
+  ChooseSenesingChannel(3);
   ChooseISFETChannel(2);
 }
 
@@ -170,19 +170,27 @@ void loop() {
   // ============================================
   if (millis() - last_time > 30000) {
     last_time = millis();
-    
+     AppPHCtrl(PHCTRL_START,0);
     // 如果不是扫频模式，触发单点测量
     if (!g_isSweepMode) {
-       AppBIOZCtrl(BIOZCTRL_START, 0);
+       //AppBIOZCtrl(BIOZCTRL_START, 0);
     }
   }
-
-  // ============================================
-  // 2. 读取部分：持续轮询 (Polling)
-  // ============================================
-  // 不论是否到了 500ms，只要 AD5941 有数据回来，就立刻处理
-  // 这样可以保证数据产生后约 20ms 内就被读走，不会堆积
-  
+  if (g_isPhMode) {
+    Serial.print("b");
+      // 调用 pH 的 ISR 读取数据
+      if (AppPHISR(AppBuff, &tempCount) == 0) {
+        Serial.print("c");
+          if (tempCount > 0) {
+              // 显示结果
+              Serial.print("a");
+              PHShowResult(AppBuff, tempCount);
+              // 单次测量完成后，你可以选择保持 g_isPhMode = true 等待下一次命令
+              // 也可以不动作，因为没有 Trigger 就不会有新数据
+          }
+          g_isPhMode = false;
+      }
+  }
   if (!g_isSweepMode) {
       // 检查 AD5941 是否有新数据
       if (AppBIOZISR(AppBuff, &tempCount) == 0) 
@@ -197,17 +205,10 @@ void loop() {
              Serial.printf(" Water Temp: %3f \n", currentTemp);
           } else {
              Serial.println("Temp Read Failed!");
-          }
-
-          // 2. 打印阻抗/电导率结果
-          
+          }          
         }
       }
   } 
-  
-  // ============================================
-  // 3. 扫频模式的特殊处理 (保持原有逻辑)
-  // ============================================
   else {
       // 如果是扫频模式，逻辑稍有不同，这里保留你原本的扫频处理
       if(AppBIOZISR(AppBuff, &tempCount) == 0) {
@@ -281,40 +282,12 @@ void handleSerialCommand() {
       Serial.println("Calibration Cleared.");
     }
     // === 新增: "imp" -> 触发一次阻抗测量 ===
-    else if (cmd == "imp") {
-       Serial.println("Triggering Impedance Measurement (1000Hz)...");
-       // 所以这里调用它会直接让 AD5941 跑一次 SRAM 里的 SEQID_0 序列
-       AppIMPCtrl(IMPCTRL_START, 0);
-    }
     else if (cmd == "bioz") {
        Serial.println("Triggering BIOZ_Impedance Measurement (1000Hz)...");
        // 所以这里调用它会直接让 AD5941 跑一次 SRAM 里的 SEQID_0 序列
        AppBIOZCtrl(BIOZCTRL_START, 0);
     }    
 
-    else if (cmd == "sweep") {
-       if (g_isSweepMode) {
-           Serial.println("Already sweeping!");
-           return;
-       }
-       
-       Serial.println("[CMD] Starting Frequency Sweep (1kHz -> 100kHz)...");
-       // 1. 配置参数
-       AppIMPCfg.SweepCfg.SweepEn = bTRUE;
-       AppIMPCfg.SweepCfg.SweepLog = bFALSE;
-       AppIMPCfg.bParaChanged = bTRUE;   
-       // 3. 初始化服务 (这会计算出 SweepNextFreq = 2000.0)
-       if (AppIMPInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-           g_isSweepMode = true;
-           // === 核心修复：使用独立计数器 ===
-           g_sweepCount = 0; 
-           g_sweepTotalPoints = AppIMPCfg.SweepCfg.SweepPoints;
-           // 4. 触发第 1 个点 (1000Hz)
-           AppIMPCtrl(IMPCTRL_START, 0);
-       } else {
-           Serial.println("Sweep Init Failed!");
-       }
-    }
         else if (cmd == "biozsweep") {
        if (g_isSweepMode) {
            Serial.println("Already sweeping!");
@@ -337,5 +310,20 @@ void handleSerialCommand() {
            Serial.println("Sweep Init Failed!");
        }
     }
+    else if (cmd == "readph") {
+      Serial.println("Triggering Single pH Measurement...");
+      // 1. 切换模式标志
+      g_isPhMode = true;
+      g_isSweepMode = false; // 确保不处于扫频模式
+      AppPHCtrl(PHCTRL_START, 0);
+      // 2. 重新初始化 pH 服务 (保险起见，确保 DAC/开关配置切换到 pH 模式)
+      // 如果你确定上一次操作也是 pH，这步可以省略，但加上更稳健
+      // if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+      //     // 3. 触发测量序列 (SEQID_0)
+      //     AppPHCtrl(PHCTRL_START, 0);
+      // } else {
+      //     Serial.println("pH Init Failed!");
+      // }
+  }
   }
 }
