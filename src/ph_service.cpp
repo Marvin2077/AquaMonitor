@@ -227,7 +227,7 @@ AD5940Err AppPHSeqMeasureGen(void)
   clks_cal.ADCAvgNum = ADCAVGNUM_16;
   clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;;
   AD5940_ClksCalculate(&clks_cal,&WaitClks);
-  WaitClks = (WaitClks * 2) + 1000;
+  WaitClks = (WaitClks * 2) +500;
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
