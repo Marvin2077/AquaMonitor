@@ -10,6 +10,7 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.MaxSeqLen = 512;
     AppPHCfg.SeqStartAddrCal = 0;
     AppPHCfg.MaxSeqLenCal = 0;
+    AppPHCfg.PHInited = bFALSE;
     //LPDAC
     AppPHCfg.LpdacSel = LPDAC0;
     // 设置 VBIAS = 1.2V (0x745)
@@ -49,7 +50,7 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.HstiaCtia = 16;
     AppPHCfg.HstiaDeRload = HSTIADERLOAD_OPEN;
     AppPHCfg.HstiaDeRtia = HSTIADERTIA_OPEN;
-    AppPHCfg.HstiaRtiaSel = HSTIARTIA_200;
+    AppPHCfg.HstiaRtiaSel = HSTIARTIA_1K;
     //switch Matrix
     AppPHCfg.DswitchSel = SWD_OPEN;
     AppPHCfg.PswitchSel = SWP_OPEN;
@@ -182,8 +183,8 @@ AD5940Err AppPHSeqCfgGen(void)
   adc_filter.ADCRate = ADCRATE_1P6MHZ;
   adc_filter.ADCSinc2Osr = ADCSINC2OSR_22;
   adc_filter.ADCSinc3Osr = ADCSINC3OSR_4;
-  adc_filter.BpSinc3 = bFALSE;
   adc_filter.BpNotch = bTRUE;
+  adc_filter.BpSinc3 = bFALSE;
   adc_filter.Sinc2NotchEnable = bTRUE;
   AD5940_ADCFilterCfgS(&adc_filter);
   
@@ -227,6 +228,7 @@ AD5940Err AppPHSeqMeasureGen(void)
   clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;;
   AD5940_ClksCalculate(&clks_cal,&WaitClks);
   WaitClks = (WaitClks * 2) + 1000;
+
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
   // 1. 开启 ADC 转换
@@ -279,17 +281,17 @@ AD5940Err AppPHInit(uint32_t *pBuffer, uint32_t BufferSize)
     fifo_cfg.FIFOSrc = FIFOSRC_SINC3; // ★ 改为 SINC3
     fifo_cfg.FIFOThresh = 1;          // 只要有1个数据就中断
     AD5940_FIFOCfg(&fifo_cfg);
-    AD5940_INTCCfg(AFEINTC_0, AFEINTSRC_DATAFIFOTHRESH, bTRUE);
-
     AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
 
+    //如果第一次运行或者参数变化 → 重建序列
     if((AppPHCfg.PHInited == bFALSE)||\
       (AppPHCfg.bParaChanged == bTRUE))
     {
+      Serial.print("ABC");
         if(pBuffer == 0)return AD5940ERR_PARA;
         if(BufferSize == 0) return AD5940ERR_PARA;
         AD5940_SEQGenInit(pBuffer,BufferSize);
-        //init seq
+        /*重新生成初始化序列*/
         error = AppPHSeqCfgGen();
         if(error != AD5940ERR_OK)return error;
         Serial.print("D\n");
@@ -306,8 +308,15 @@ AD5940Err AppPHInit(uint32_t *pBuffer, uint32_t BufferSize)
     AD5940_SEQCfg(&seq_cfg);
     AD5940_SEQMmrTrig(AppPHCfg.InitSeqInfo.SeqId);
     while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_ENDSEQ) == bFALSE);
+    /* Measurement sequence  */
+    AppPHCfg.MeasureSeqInfo.WriteSRAM = bFALSE;
+    AD5940_SEQInfoCfg(&AppPHCfg.MeasureSeqInfo);
+    seq_cfg.SeqEnable = bTRUE;
+    AD5940_SEQCfg(&seq_cfg);  /* Enable sequencer, and wait for trigger */
     AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
     AD5940_ClrMCUIntFlag(); 
+
+
     AppPHCfg.PHInited = bTRUE;
     return AD5940ERR_OK;
 }
@@ -345,7 +354,7 @@ AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
 {
   // 1. 定义常量
     const float VREF_ADC = 1.82f; // ADC 参考电压 (内部 1.82V)
-    const float RTIA_VAL = 200.0f; // 你在 HSTIA 配置里选的是 10k (HSTIARTIA_10K)
+    const float RTIA_VAL = 1000.0f; // 你在 HSTIA 配置里选的是 10k (HSTIARTIA_10K)
     // 注意：如果你改了配置里的电阻，这里也要改！
     
     // 2. 遍历数据

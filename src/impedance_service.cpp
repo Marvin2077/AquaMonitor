@@ -358,8 +358,7 @@ static AD5940Err AppIMPSeqMeasureGen(void)
         AD5940_SEQCmdWrite(AppIMPCfg.MeasureSeqInfo.SeqRamAddr, pSeqCmd, SeqLen);
     }
     else
-        return error; /* Error */
-
+      return error; /* Error */
     return AD5940ERR_OK;
 }
 
