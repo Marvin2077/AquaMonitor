@@ -57,6 +57,9 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.NswitchSel = SWN_OPEN;
     AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA;
     //ADC Filter
+
+    //Calibration
+    AppPHCfg.ZeroOffset_Code =0;
     return AD5940ERR_OK;
 
 }
@@ -220,7 +223,6 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   uint32_t WaitClks;
   ClksCalInfo_Type clks_cal;
-  SWMatrixCfg_Type sw_cfg;
   clks_cal.DataType = DATATYPE_SINC3;
   clks_cal.DataCount = 1;
   clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
@@ -234,11 +236,7 @@ AD5940Err AppPHSeqMeasureGen(void)
   //  开启电源
   AD5940_AFECtrlS(AFECTRL_ADCPWR | AFECTRL_HSTIAPWR | AFECTRL_SINC2NOTCH | AFECTRL_INAMPPWR | AFECTRL_EXTBUFPWR, bTRUE);
   AD5940_SEQGenInsert(SEQ_WAIT(16*80));
-  sw_cfg.Dswitch = SWD_OPEN;
-  sw_cfg.Pswitch = SWP_OPEN;
-  sw_cfg.Nswitch = SWN_OPEN;
-  sw_cfg.Tswitch = SWT_TRTIA;
-  AD5940_SWMatrixCfgS(&sw_cfg);
+
   //  开启 ADC 转换
   AD5940_AFECtrlS(AFECTRL_ADCCNV, bTRUE); 
   // 2. 等待转换完成
@@ -361,6 +359,7 @@ AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
   // 1. 定义常量
     const float VREF_ADC = 1.82f; // ADC 参考电压 (内部 1.82V)
     const float RTIA_VAL = 1000.0f; // 你在 HSTIA 配置里选的是 10k (HSTIARTIA_10K)
+    const uint32_t V_offset = AppPHCfg.ZeroOffset_Code;
     // 注意：如果你改了配置里的电阻，这里也要改！
     
     // 2. 遍历数据
