@@ -220,7 +220,7 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   uint32_t WaitClks;
   ClksCalInfo_Type clks_cal;
-
+  SWMatrixCfg_Type sw_cfg;
   clks_cal.DataType = DATATYPE_SINC3;
   clks_cal.DataCount = 1;
   clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
@@ -231,9 +231,15 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
-  // 1. 开启 ADC 转换
+  //  开启电源
   AD5940_AFECtrlS(AFECTRL_ADCPWR | AFECTRL_HSTIAPWR | AFECTRL_SINC2NOTCH | AFECTRL_INAMPPWR | AFECTRL_EXTBUFPWR, bTRUE);
   AD5940_SEQGenInsert(SEQ_WAIT(16*80));
+  sw_cfg.Dswitch = SWD_OPEN;
+  sw_cfg.Pswitch = SWP_OPEN;
+  sw_cfg.Nswitch = SWN_OPEN;
+  sw_cfg.Tswitch = SWT_TRTIA;
+  AD5940_SWMatrixCfgS(&sw_cfg);
+  //  开启 ADC 转换
   AD5940_AFECtrlS(AFECTRL_ADCCNV, bTRUE); 
   // 2. 等待转换完成
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks)); 

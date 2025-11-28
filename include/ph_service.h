@@ -10,14 +10,15 @@ extern "C"{
 typedef struct 
 {
     //General Setting
+    BoolFlag PHInited;   
     BoolFlag bParaChanged;
+    //SEQ Parameters
     uint32_t SeqStartAddr;
     uint32_t MaxSeqLen;
     uint32_t SeqStartAddrCal;
     uint32_t MaxSeqLenCal;
     BoolFlag StopRequired; 
     float FreqofData;                             /* 最新采样数据的频率 */
-    BoolFlag PHInited;                          /* 如果程序首次运行，则生成序列命令 */
     SEQInfo_Type InitSeqInfo;
     SEQInfo_Type MeasureSeqInfo;
     uint32_t FifoDataCount;        
@@ -35,7 +36,6 @@ typedef struct
     BoolFlag PowerEn;         /**< Power up REG_AFE_LPDACDAT0 */
     uint16_t DacData12Bit;    /**< Data for 12bit DAC */
     uint16_t DacData6Bit;     /**< Data for 6bit DAC */
-
     //LPAmp
     uint32_t LpAmpSel;        /**< Select from LPAMP0 and LPAMP1. LPAMP1 is only available on ADuCM355. */
     uint32_t LpTiaRf;         /**< The one order RC filter resistor selection. Select from @ref LPTIARF_Const */
@@ -58,6 +58,9 @@ typedef struct
     uint32_t PswitchSel;
     uint32_t NswitchSel;
     uint32_t TswitchSel;
+    // Calibration
+    uint32_t R_TIA_cal;
+    uint32_t ZeroOffset_Code;
 }AppPHCfg_Type;
 extern AppPHCfg_Type AppPHCfg;
 
