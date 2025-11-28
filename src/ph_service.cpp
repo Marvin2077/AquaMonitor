@@ -53,13 +53,14 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.HstiaRtiaSel = HSTIARTIA_1K;
     //switch Matrix
     AppPHCfg.DswitchSel = SWD_OPEN;
-    AppPHCfg.PswitchSel = SWP_OPEN;
-    AppPHCfg.NswitchSel = SWN_OPEN;
+    AppPHCfg.PswitchSel = SWP_PL|SWP_PL2;
+    AppPHCfg.NswitchSel = SWN_NL|SWN_NL2;
     AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA;
     //ADC Filter
 
     //Calibration
-    AppPHCfg.ZeroOffset_Code =0;
+    AppPHCfg.ZeroOffset_Code = 32768; // 默认中点 (对应 0V)
+    AppPHCfg.Rtia_Value_Ohm = 1000.0f; // 默认 1k
     return AD5940ERR_OK;
 
 }
@@ -169,10 +170,10 @@ AD5940Err AppPHSeqCfgGen(void)
   hs_loop.HsTiaCfg.HstiaDeRload = AppPHCfg.HstiaDeRload;
   hs_loop.HsTiaCfg.HstiaDeRtia = AppPHCfg.HstiaDeRtia;
   hs_loop.HsTiaCfg.HstiaRtiaSel = AppPHCfg.HstiaRtiaSel;
-  hs_loop.SWMatCfg.Dswitch = SWD_OPEN;
-  hs_loop.SWMatCfg.Pswitch = SWP_PL|SWP_PL2;
-  hs_loop.SWMatCfg.Nswitch = SWN_NL|SWN_NL2;
-  hs_loop.SWMatCfg.Tswitch = SWT_AIN0 |SWT_TRTIA; //关键点1
+  hs_loop.SWMatCfg.Dswitch = AppPHCfg.DswitchSel;
+  hs_loop.SWMatCfg.Pswitch = AppPHCfg.PswitchSel;
+  hs_loop.SWMatCfg.Nswitch = AppPHCfg.NswitchSel;
+  hs_loop.SWMatCfg.Tswitch = AppPHCfg.TswitchSel; //关键点1
   AD5940_HSLoopCfgS(&hs_loop);
   //V_out = 1.11V - I * R_TIA
   AD5940_StructInit(&adc_base,sizeof(adc_base));
@@ -226,10 +227,11 @@ AD5940Err AppPHSeqMeasureGen(void)
   clks_cal.DataType = DATATYPE_SINC3;
   clks_cal.DataCount = 1;
   clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
+  clks_cal.ADCSinc2Osr = ADCSINC2OSR_22;
   clks_cal.ADCAvgNum = ADCAVGNUM_16;
   clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;;
   AD5940_ClksCalculate(&clks_cal,&WaitClks);
-  WaitClks = (WaitClks * 2) +500;
+  //WaitClks = (WaitClks * 2) +500;
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
@@ -291,14 +293,12 @@ AD5940Err AppPHInit(uint32_t *pBuffer, uint32_t BufferSize)
     if((AppPHCfg.PHInited == bFALSE)||\
       (AppPHCfg.bParaChanged == bTRUE))
     {
-      Serial.print("ABC");
         if(pBuffer == 0)return AD5940ERR_PARA;
         if(BufferSize == 0) return AD5940ERR_PARA;
         AD5940_SEQGenInit(pBuffer,BufferSize);
         /*重新生成初始化序列*/
         error = AppPHSeqCfgGen();
         if(error != AD5940ERR_OK)return error;
-        Serial.print("D\n");
         //measure seq
       /* 生成测量序列 */
         error = AppPHSeqMeasureGen();
@@ -337,14 +337,11 @@ AD5940Err AppPHISR(void *pBuff, uint32_t *pCount)
 
     AD5940_SleepKeyCtrlS(SLPKEY_LOCK);
     *pCount = 0;
-    Serial.print("G");
     if(AD5940_INTCTestFlag(AFEINTC_0,AFEINTSRC_DATAFIFOTHRESH)==bTRUE)
     {
       FIFOCnt = AD5940_FIFOGetCnt();
-      Serial.print("F");
       if(FIFOCnt > 0)
       {
-        Serial.print("E");
         AD5940_FIFORd((uint32_t *)pBuff,FIFOCnt);
         *pCount = FIFOCnt;
       }
@@ -358,8 +355,8 @@ AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
 {
   // 1. 定义常量
     const float VREF_ADC = 1.82f; // ADC 参考电压 (内部 1.82V)
-    const float RTIA_VAL = 1000.0f; // 你在 HSTIA 配置里选的是 10k (HSTIARTIA_10K)
-    const uint32_t V_offset = AppPHCfg.ZeroOffset_Code;
+    const float RTIA_VAL = AppPHCfg.Rtia_Value_Ohm; 
+    const uint32_t V_offset = AppPHCfg.Rtia_Value_Ohm;
     // 注意：如果你改了配置里的电阻，这里也要改！
     
     // 2. 遍历数据
@@ -372,7 +369,8 @@ AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
         // AD5940 的 ADC 在 Sinc3 模式下，Code=0x8000 对应 0V 差分输入
         // 即：(Vin_P - Vin_N) = 0V
         // Code 转 Voltage 公式:
-        float voltage_diff = ((float)rawCode - 32768.0f) / 32768.0f * VREF_ADC;
+        int32_t diff_code = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
+        float voltage_diff = ((float)diff_code / 32768.0f) * VREF_ADC;
         
         // 4. 转换为电流
         // HSTIA 输出电压 Vout = Vbias - I * Rtia

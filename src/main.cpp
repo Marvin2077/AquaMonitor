@@ -1,21 +1,23 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-//所有驱动层头文件
+
 #include "storage_manager.h"
 #include "mux_iface.h"
-#include "spi_hal.h"        // 底层硬件操作
-#include "ads124s08_board_glue.h"     // 胶水层
-#include "ads124s08_drv.h"  // 通用驱动层
-#include "ad5941_board_glue.h"      // 引入 Glue 层头文件
-#include "ad5941PlatformCfg.h"
-#include "temp_service.h" 
-#include "impedance_service.h" 
-#include "2Wire_service.h"
-#include "ph_service.h"
+#include "spi_hal.h"        
+//芯片驱动与Glue头文件
+#include "ads124s08_board_glue.h"    
+#include "ads124s08_drv.h"  
 extern "C" {
 #include "ad5940.h"
 }
+#include "ad5941_board_glue.h"   
+#include "ad5941PlatformCfg.h"
+//服务头文件
+#include "temp_service.h" 
+#include "Conductivity_service.h"
+#include "ph_service.h"
+
 
 /* ====== 共用 SPI 总线引脚 ====== */
 static const int PIN_SCLK = 14; // ESP32 SPI 时钟线
@@ -36,16 +38,17 @@ void handleSerialCommand();
 // 定义用于存放 AD5941 序列器指令的缓冲区
 #define APPBUFF_SIZE 512
 uint32_t AppBuff[APPBUFF_SIZE];
-// 声明阻抗测量的配置结构体
-extern AppIMPCfg_Type AppIMPCfg;
-// === 单频/扫频标志 ===
+// === 电导率服务标志位/全局变量 ===
 // false = 日常单频模式 (1000Hz)
 // true  = 正在进行扫频
 bool g_isSweepMode = false;
 int g_sweepCount = 0;     // 当前已测量的点数
 int g_sweepTotalPoints = 0; // 总共要测的点数
-// ===pH 服务标志位
+// ===pH 服务标志位/全局变量 ===
 bool g_isPhMode = false;
+bool g_isCalibratingOffset = false; // 是否正在进行 Offset 校准
+bool g_isCalibratingGain = false;   // 是否正在校准增益
+float g_calResistorValue = 1000.0f; // 用户输入的校准电阻阻值 (默认为 1k)
 // === ADS124S08 全局变量 ===
 // 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* ads124s08 = nullptr;
@@ -57,22 +60,13 @@ bool is_calibrating = false;
 
 void setup() {
   //读取Device id
-
   Serial.begin(115200);
   ensureDeviceID();
   delay(1000);
-  // 初始化测量通道MUX的地址引脚
-  // 初始化为通道1
-  pinMode(CHANNEL_MUX_ADDR1, OUTPUT);
-  digitalWrite(CHANNEL_MUX_ADDR1, HIGH);
-  pinMode(CHANNEL_MUX_ADDR0, OUTPUT);
-  digitalWrite(CHANNEL_MUX_ADDR0, LOW);
-  pinMode(ISFET_MUX_ADDR2, OUTPUT);
-  digitalWrite(ISFET_MUX_ADDR2, LOW);
-  pinMode(ISFET_MUX_ADDR1, OUTPUT);
-  digitalWrite(ISFET_MUX_ADDR1, LOW);
-  pinMode(ISFET_MUX_ADDR0, OUTPUT);
-  digitalWrite(ISFET_MUX_ADDR0, LOW);
+  //初始化MUX
+  MUXPinInit();
+  ChooseSenesingChannel(1);
+  ChooseISFETChannel(1);
 
   //初始化 SPI 总线
   SpiHAL::beginBus(PIN_SCLK, PIN_MISO, PIN_MOSI);
@@ -81,7 +75,7 @@ void setup() {
   Serial.println("======================================");
   Serial.println(" AD5941 Setup Start ");
   Serial.println("======================================");
-
+  
   // 1) 创建 AD5941 的 SpiDevice 对象
   static SpiDevice ad5941_spidev(CS_AD5941, 8000000 /* 8MHz */, MSBFIRST, SPI_MODE0);
   Serial.println("SpiDevice for AD5941 created.");
@@ -106,6 +100,7 @@ void setup() {
   Serial.println("======================================");
    // 1)  初始化 ADS124S08 SPI 总线
   static SpiDevice ads_spidev(CS_ADS124S08, 4000000, MSBFIRST, SPI_MODE1);
+  Serial.println("SpiDevice for AD5941 created.");
   //  2)  定义 ADS124S08 的 Glue 配置
   AdsGlueConfig ads_cfg = {
     .spi = &ads_spidev,
@@ -133,7 +128,7 @@ void setup() {
   // --- 初始化 AD5941 阻抗测量服务 --- //
   //Serial.println("Initializing Impedance Service...");
   //初始化应用参数结构体
-  //AppBIOZCfg_init();
+  //AppCondCfg_init();
   AppPHCfg_init();
   // 5. 配置2线应用参数 (修改Rcal和AIN1)
   if(AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
@@ -144,18 +139,15 @@ void setup() {
         Serial.println("pH Service Init FAILED!");
     }
   // Serial.println("Running RTIA Calibration... This may take a moment.");
-  // if(AppBIOZInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-  //   Serial.println("BIOZ_Impedance Service Init OK!");
+  // if(AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+  //   Serial.println("Cond_Impedance Service Init OK!");
   // }
   // else 
   //   {
-  //       Serial.println("BIOZ_Impedance Service Init FAILED!");
+  //       Serial.println("Cond_Impedance Service Init FAILED!");
   //   }
   //完成芯片和服务初始化
   Serial.println("System Initialized");
-  // 测试MUX控制
-  ChooseSenesingChannel(3);
-  ChooseISFETChannel(2);
 }
 
 
@@ -164,41 +156,83 @@ void loop() {
   uint32_t tempCount = APPBUFF_SIZE;
   
   handleSerialCommand();
-
-  // ============================================
-  // 1. 触发部分：每 500ms 告诉 AD5941 开始测量
-  // ============================================
-  if (millis() - last_time > 30000) {
+  // 1. 触发部分：每 500ms
+  if (millis() - last_time > 500) {
     last_time = millis();
      AppPHCtrl(PHCTRL_START,0);
     // 如果不是扫频模式，触发单点测量
     if (!g_isSweepMode) {
-       //AppBIOZCtrl(BIOZCTRL_START, 0);
+       //AppCondCtrl(CondCTRL_START, 0);
     }
   }
-  if (g_isPhMode) {
-    Serial.print("b");
-      // 调用 pH 的 ISR 读取数据
-      if (AppPHISR(AppBuff, &tempCount) == 0) {
-        Serial.print("c");
-          if (tempCount > 0) {
-              // 显示结果
-              Serial.print("a");
-              PHShowResult(AppBuff, tempCount);
-              // 单次测量完成后，你可以选择保持 g_isPhMode = true 等待下一次命令
-              // 也可以不动作，因为没有 Trigger 就不会有新数据
-          }
-          g_isPhMode = false;
-      }
-  }
+  if (g_isPhMode || g_isCalibratingOffset || g_isCalibratingGain) {
+        if (AppPHISR(AppBuff, &tempCount) == 0) {
+            if (tempCount > 0) {
+                
+                // === 分支 1：如果是校准模式 ===
+                if (g_isCalibratingOffset) {
+                    // 取第一个点作为 Offset (或者你可以做平均)
+                    uint16_t measured_offset = AppBuff[0] & 0xFFFF;
+                    
+                    // 保存到配置中
+                    AppPHCfg.ZeroOffset_Code = measured_offset;
+                    
+                    Serial.printf(">>> Offset Calibrated! New Zero Code: 0x%04X (%d) <<<\n", measured_offset, measured_offset);
+                    
+                    // 校准完成后，自动恢复开关设置到正常模式
+                    AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; // 恢复连接传感器
+                    AppPHCfg.bParaChanged = bTRUE;
+                    AppPHInit(AppBuff, APPBUFF_SIZE); // 重建序列
+                    
+                    g_isCalibratingOffset = false; // 退出校准模式
+                } 
+                else if (g_isCalibratingGain) {
+                  // 1. 获取原始 Code (取第0个点)
+                  uint16_t rawCode = AppBuff[0] & 0xFFFF;
+                  
+                  // 2. 计算去 Offset 后的电压绝对值
+                  // 使用你之前校准好的 ZeroOffset_Code
+                  int32_t diff_code = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
+                  // 1.82V 是量程，32768 是半满量程
+                  float voltage_diff = ((float)diff_code / 32768.0f) * 1.82f;
+                  float abs_volt = fabs(voltage_diff);
+
+                  // 3. 反推真实 RTIA
+                  // 原理: |Volt| = I_ideal * R_tia_real
+                  //       I_ideal = 1.1V / R_ext
+                  // 所以: R_tia_real = (|Volt| * R_ext) / 1.1V
+                  
+                  if (abs_volt > 0.05f) { // 确保有足够电压，防止除零或噪声干扰
+                      float calculated_rtia = (abs_volt * g_calResistorValue) / 1.1f;
+                      
+                      // 4. 更新系统参数
+                      AppPHCfg.Rtia_Value_Ohm = calculated_rtia;
+                      
+                      Serial.printf(">>> Gain Calibrated! Raw:0x%04X, Vdiff:%.4fV, New RTIA: %.2f Ohm <<<\n", 
+                                    rawCode, voltage_diff, calculated_rtia);
+                  } else {
+                      Serial.printf(">>> Error: Signal too low (%.4fV). Is resistor connected? <<<\n", abs_volt);
+                  }
+                  
+                  // 退出校准模式
+                  g_isCalibratingGain = false;
+              }
+                // === 分支 2：如果是普通测量模式 ===
+                else {
+                    PHShowResult(AppBuff, tempCount);
+                    g_isPhMode = false;
+                }
+            }
+        }
+    }
   if (!g_isSweepMode) {
       // 检查 AD5941 是否有新数据
-      if (AppBIOZISR(AppBuff, &tempCount) == 0) 
+      if (AppCondISR(AppBuff, &tempCount) == 0) 
       {
         // 只有当真正读到数据时 (tempCount > 0)
         if (tempCount > 0) 
         {
-          BIOZShowResult(AppBuff, tempCount);
+          CondShowResult(AppBuff, tempCount);
           double currentTemp = 0.0;
           // 1. 此时再去测温度，保证时间和阻抗数据对齐
           if (g_tempSvc->measure(currentTemp)) {
@@ -211,20 +245,20 @@ void loop() {
   } 
   else {
       // 如果是扫频模式，逻辑稍有不同，这里保留你原本的扫频处理
-      if(AppBIOZISR(AppBuff, &tempCount) == 0) {
+      if(AppCondISR(AppBuff, &tempCount) == 0) {
           if(tempCount > 0) {
-              BIOZShowResult(AppBuff, tempCount);
+              CondShowResult(AppBuff, tempCount);
               g_sweepCount++;
               if (g_sweepCount < g_sweepTotalPoints) {
-                  AppBIOZCtrl(BIOZCTRL_START, 0); 
+                  AppCondCtrl(CondCTRL_START, 0); 
               } else {
                   Serial.println(">>> Sweep Completed! <<<");
                   g_isSweepMode = false;
                   // 恢复单点参数...
-                  AppBIOZCfg.SinFreq = 2000.0; // 设回你的默认频率
-                  AppBIOZCfg.SweepCfg.SweepEn = bFALSE;
-                  AppBIOZCfg.bParaChanged = bTRUE;
-                  AppBIOZInit(AppBuff, APPBUFF_SIZE); 
+                  AppCondCfg.SinFreq = 2000.0; // 设回你的默认频率
+                  AppCondCfg.SweepCfg.SweepEn = bFALSE;
+                  AppCondCfg.bParaChanged = bTRUE;
+                  AppCondInit(AppBuff, APPBUFF_SIZE); 
               }
           }
       }
@@ -282,13 +316,13 @@ void handleSerialCommand() {
       Serial.println("Calibration Cleared.");
     }
     // === 新增: "imp" -> 触发一次阻抗测量 ===
-    else if (cmd == "bioz") {
-       Serial.println("Triggering BIOZ_Impedance Measurement (1000Hz)...");
+    else if (cmd == "Cond") {
+       Serial.println("Triggering Cond_Impedance Measurement (1000Hz)...");
        // 所以这里调用它会直接让 AD5941 跑一次 SRAM 里的 SEQID_0 序列
-       AppBIOZCtrl(BIOZCTRL_START, 0);
+       AppCondCtrl(CondCTRL_START, 0);
     }    
 
-        else if (cmd == "biozsweep") {
+        else if (cmd == "Condsweep") {
        if (g_isSweepMode) {
            Serial.println("Already sweeping!");
            return;
@@ -296,34 +330,94 @@ void handleSerialCommand() {
        
        Serial.println("[CMD] Starting Frequency Sweep (1kHz -> 100kHz)...");
        // 1. 配置参数
-       AppBIOZCfg.SweepCfg.SweepEn = bTRUE;
-       AppBIOZCfg.ReDoRtiaCal = bTRUE;
-       AppBIOZCfg.bParaChanged = bTRUE;   
+       AppCondCfg.SweepCfg.SweepEn = bTRUE;
+       AppCondCfg.ReDoRtiaCal = bTRUE;
+       AppCondCfg.bParaChanged = bTRUE;   
        // 3. 初始化服务 (这会计算出 SweepNextFreq = 2000.0)
-       if (AppBIOZInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+       if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
            g_isSweepMode = true;
            g_sweepCount = 0; 
-           g_sweepTotalPoints = AppBIOZCfg.SweepCfg.SweepPoints;
+           g_sweepTotalPoints = AppCondCfg.SweepCfg.SweepPoints;
            // 4. 触发第 1 个点 (1000Hz)
-           AppBIOZCtrl(BIOZCTRL_START, 0);
+           AppCondCtrl(CondCTRL_START, 0);
        } else {
            Serial.println("Sweep Init Failed!");
        }
     }
-    else if (cmd == "readph") {
+    else if (cmd == "ph read") {
       Serial.println("Triggering Single pH Measurement...");
       // 1. 切换模式标志
       g_isPhMode = true;
       g_isSweepMode = false; // 确保不处于扫频模式
       AppPHCtrl(PHCTRL_START, 0);
-      // 2. 重新初始化 pH 服务 (保险起见，确保 DAC/开关配置切换到 pH 模式)
-      // 如果你确定上一次操作也是 pH，这步可以省略，但加上更稳健
-      // if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-      //     // 3. 触发测量序列 (SEQID_0)
-      //     AppPHCtrl(PHCTRL_START, 0);
-      // } else {
-      //     Serial.println("pH Init Failed!");
-      // }
   }
+    else if (cmd == "ph cal offset") {
+      Serial.println("[CMD] Calibrating pH Offset (Disconnecting Input)...");
+      
+      // 1. 修改配置：断开所有开关 (SWT_OPEN)
+      // 这样 ADC 测量的就是系统本身的底噪/偏置
+
+      AppPHCfg.TswitchSel =  SWT_TRTIA; 
+
+      // 2. 标记参数已改变，并重新初始化序列
+      AppPHCfg.bParaChanged = bTRUE;
+      if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+          // 3. 设置校准标志位，并触发一次测量
+          g_isCalibratingOffset = true;
+          g_isPhMode = false; // 暂停普通模式的打印
+          AppPHCtrl(PHCTRL_START, 0);
+      } else {
+          Serial.println("Cal Init Failed!");
+      }
+    }
+    
+    // === 恢复正常测量模式指令 (可选) ===
+    else if (cmd == "ph reset") {
+       // 恢复默认开关连接
+       AppPHCfg.DswitchSel = SWD_OPEN;
+       AppPHCfg.PswitchSel = SWP_PL|SWP_PL2;
+       AppPHCfg.NswitchSel = SWN_NL|SWN_NL2;
+       AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
+       AppPHCfg.bParaChanged = bTRUE;
+       AppPHInit(AppBuff, APPBUFF_SIZE);
+       Serial.println("Restored to Normal pH Mode.");
+    } 
+    else if (cmd.startsWith("ph cal gain")) {
+        // 1. 解析输入的电阻值
+        String valStr = cmd.substring(11); // "ph cal gain" 长度是 11
+        valStr.trim();
+        
+        if (valStr.length() > 0) {
+            float r_val = valStr.toFloat();
+            if (r_val > 0) {
+                g_calResistorValue = r_val;
+                Serial.printf("[CMD] Calibrating Gain with R_ext = %.1f Ohm...\n", g_calResistorValue);
+
+                // 2. 确保开关是连接状态 (AIN0 + TRTIA)
+                // 如果之前跑了 offset 校准，开关可能是断开的，这里要连回去
+                AppPHCfg.DswitchSel = SWD_OPEN;
+                AppPHCfg.PswitchSel = SWP_PL | SWP_PL2;
+                AppPHCfg.NswitchSel = SWN_NL | SWN_NL2;
+                AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
+
+                // 3. 重新初始化序列以应用开关设置
+                AppPHCfg.bParaChanged = bTRUE;
+                if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+                    // 4. 设置标志位并触发
+                    g_isCalibratingGain = true;
+                    g_isPhMode = false; // 暂停普通打印
+                    g_isCalibratingOffset = false;
+                    AppPHCtrl(PHCTRL_START, 0);
+                } else {
+                    Serial.println("Gain Cal Init Failed!");
+                }
+            } else {
+                Serial.println("Invalid Resistor Value!");
+            }
+        } else {
+            Serial.println("Usage: ph cal gain <ohms> (e.g., ph cal gain 1000)");
+        }
+    }
+
   }
 }

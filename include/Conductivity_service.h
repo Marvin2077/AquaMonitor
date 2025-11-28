@@ -1,21 +1,5 @@
-/*!
- @file:    BIOZ-2Wire.h
- @author:  Neo Xu
- @brief:   **两线 BIOZ 阻抗测量**示例的头文件（由四线版本修改而来）。
- -----------------------------------------------------------------------------
-
-Copyright (c) 2017-2019 Analog Devices, Inc. All Rights Reserved.
-
-This software is proprietary to Analog Devices, Inc. and its licensors.
-By using this software you agree to the terms of the associated
-Analog Devices Software License Agreement.
-
-*****************************************************************************/
-
-/* 注：为避免歧义，保留了上方版权/许可的英文原文；功能性注释均已翻译为中文。*/
-
-#ifndef _BODYCOMPOSITION_H_
-#define _BODYCOMPOSITION_H_
+#ifndef _CONDUCTIVITY_SERVICE_H_
+#define _CONDUCTIVITY_SERVICE_H_
 extern "C" {
 #include "ad5940.h"
 }
@@ -32,7 +16,7 @@ extern "C" {
 typedef struct
 {
 /* 适用于所有类型应用的通用配置。 */
-  BoolFlag bParaChanged;        /* 指示是否需要再次生成序列。AppBIOZInit 会自动清除此标志 */
+  BoolFlag bParaChanged;        /* 指示是否需要再次生成序列。AppCondInit 会自动清除此标志 */
   uint32_t SeqStartAddr;        /* AD5940 SRAM 中的初始化序列起始地址 */
   uint32_t MaxSeqLen;           /* 限制最大序列长度。 */
   uint32_t SeqStartAddrCal;     /* AD5940 SRAM 中的测量序列起始地址 */
@@ -45,7 +29,7 @@ typedef struct
   float AdcClkFreq;             /* ADC 时钟的实际频率 */
   uint32_t FifoThresh;           /* FIFO 阈值。应为 N*2 */
   
-  float BIOZODR;                 /* 单位：Hz。ODR 决定了唤醒定时器（WuptClkFreq）的周期，它将周期性地触发序列发生器。DFT 点数和采样频率决定了最大 ODR。 */
+  float CondODR;                 /* 单位：Hz。ODR 决定了唤醒定时器（WuptClkFreq）的周期，它将周期性地触发序列发生器。DFT 点数和采样频率决定了最大 ODR。 */
   int32_t NumOfData;            /* 默认为 '-1'。如果希望引擎在获取 NumofData 个数据后停止，请在此处设置该值。否则，将其设置为 '-1'，表示永不停止。 */
   float SinFreq;                /* 激励信号的频率 */
   float RcalVal;                /* Rcal 电阻值（单位：欧姆） */
@@ -78,27 +62,27 @@ typedef struct
   fImpCar_Type RtiaCurrValue;                   /* 当前频率下校准的 Rtia 值 */
   fImpCar_Type RtiaCalTable[MAXSWEEP_POINTS];   /* 校准的 Rtia 值表 */
   float FreqofData;                             /* 最新采样数据的频率 */
-  BoolFlag BIOZInited;                          /* 如果程序首次运行，则生成序列命令 */
+  BoolFlag CondInited;                          /* 如果程序首次运行，则生成序列命令 */
   SEQInfo_Type InitSeqInfo;
   SEQInfo_Type MeasureSeqInfo;
   BoolFlag StopRequired;          /* FIFO 准备就绪后，停止测量序列 */
   uint32_t FifoDataCount;         /* 计算阻抗已被测量的次数 */
 /* 结束 */
-}AppBIOZCfg_Type;
-extern AppBIOZCfg_Type AppBIOZCfg; 
+}AppCondCfg_Type;
+extern AppCondCfg_Type AppCondCfg; 
 
-#define BIOZCTRL_START          0
-#define BIOZCTRL_STOPNOW        1
-#define BIOZCTRL_STOPSYNC       2
-#define BIOZCTRL_GETFREQ        3   /* 从 ISR 返回的数据流中获取当前频点 */
-#define BIOZCTRL_SHUTDOWN       4   /* 注：此处的 shutdown 意味着关闭所有功能并将 AFE 置于休眠模式。'SHUT DOWN' 一词仅在此处使用。 */
+#define CondCTRL_START          0
+#define CondCTRL_STOPNOW        1
+#define CondCTRL_STOPSYNC       2
+#define CondCTRL_GETFREQ        3   /* 从 ISR 返回的数据流中获取当前频点 */
+#define CondCTRL_SHUTDOWN       4   /* 注：此处的 shutdown 意味着关闭所有功能并将 AFE 置于休眠模式。'SHUT DOWN' 一词仅在此处使用。 */
 
-AD5940Err AppBIOZGetCfg(void *pCfg);
-AD5940Err AppBIOZInit(uint32_t *pBuffer, uint32_t BufferSize);
-AD5940Err AppBIOZISR(void *pBuff, uint32_t *pCount);
-AD5940Err AppBIOZCtrl(int32_t BcmCtrl, void *pPara);
-AD5940Err AppBIOZCheckFreq(float freq);
-AD5940Err AppBIOZCfg_init(void);
+AD5940Err AppCondGetCfg(void *pCfg);
+AD5940Err AppCondInit(uint32_t *pBuffer, uint32_t BufferSize);
+AD5940Err AppCondISR(void *pBuff, uint32_t *pCount);
+AD5940Err AppCondCtrl(int32_t BcmCtrl, void *pPara);
+AD5940Err AppCondCheckFreq(float freq);
+AD5940Err AppCondCfg_init(void);
 //int32_t AD5940PlatformCfg(void);
-int32_t BIOZShowResult(uint32_t *pData, uint32_t DataCount);
+int32_t CondShowResult(uint32_t *pData, uint32_t DataCount);
 #endif

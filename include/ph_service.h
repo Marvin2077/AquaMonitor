@@ -59,7 +59,7 @@ typedef struct
     uint32_t NswitchSel;
     uint32_t TswitchSel;
     // Calibration
-    uint32_t R_TIA_cal;
+    float    Rtia_Value_Ohm;
     uint32_t ZeroOffset_Code;
 }AppPHCfg_Type;
 extern AppPHCfg_Type AppPHCfg;

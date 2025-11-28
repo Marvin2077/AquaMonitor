@@ -3,6 +3,7 @@
 #include "Arduino.h"
 #include "stdio.h"
 #include "string.h"
+void MUXPinInit(void);
 void ChooseSenesingChannel(int channel);
 void ChooseISFETChannel(int channel);
 /* ====== ISFET MUX 特定引脚 ====== */
