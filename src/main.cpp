@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-
 #include "storage_manager.h"
 #include "mux_iface.h"
 #include "spi_hal.h"        
@@ -17,7 +16,6 @@ extern "C" {
 #include "temp_service.h" 
 #include "Conductivity_service.h"
 #include "ph_service.h"
-
 
 /* ====== 共用 SPI 总线引脚 ====== */
 static const int PIN_SCLK = 14; // ESP32 SPI 时钟线
@@ -41,22 +39,46 @@ uint32_t AppBuff[APPBUFF_SIZE];
 // === 电导率服务标志位/全局变量 ===
 // false = 日常单频模式 (1000Hz)
 // true  = 正在进行扫频
+bool g_isCondMode = false;
 bool g_isSweepMode = false;
 int g_sweepCount = 0;     // 当前已测量的点数
 int g_sweepTotalPoints = 0; // 总共要测的点数
+float g_condStdValue = 1413.0f; // 默认标准液值
+bool g_isCalibratingCond = false;
 // ===pH 服务标志位/全局变量 ===
-bool g_isPhMode = false;
+bool g_ispHMode = false;
 bool g_isCalibratingOffset = false; // 是否正在进行 Offset 校准
 bool g_isCalibratingGain = false;   // 是否正在校准增益
 float g_calResistorValue = 1000.0f; // 用户输入的校准电阻阻值 (默认为 1k)
 // === ADS124S08 全局变量 ===
 // 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* ads124s08 = nullptr;
-//创建 Temp Service 对象指针
+// ===Temperature 服务标志位/全局变量 ===
 TempService* g_tempSvc = nullptr;
 const double MY_RREF = 3300.0;
 bool is_calibrating = false;
-
+double currentTemp = 0.0;
+bool g_isTempMode = false;
+// === 有限状态机变量 ===
+enum SystemState {
+  STATE_IDLE,             // 空闲状态
+  STATE_TEMP_MEASURE,     // 温度测量
+  STATE_TEMP_CAL_P1,      // 温度校准点1
+  STATE_TEMP_CAL_P2,      // 温度校准点2
+  STATE_TEMP_CAL_P3,      // 温度校准点3
+  STATE_TEMP_SAVE_CAL,    // 温度保存校准
+  STATE_TEMP_RESET_CAL,   // 温度重置校准
+  STATE_COND_INIT,        // 电导率初始化
+  STATE_COND_MEASURE,     // 电导率测量
+  STATE_COND_SWEEP,       // 电导率扫频
+  STATE_COND_CAL,         // 电导率电极常数校准
+  STATE_PH_INIT,        // 电导率初始化
+  STATE_PH_MEASURE,       // pH 测量
+  STATE_PH_CAL_OFFSET,    // pH Offset 校准
+  STATE_PH_CAL_GAIN       // pH Gain 校准
+};
+// 当前状态变量，初始化为空闲
+SystemState currentState = STATE_IDLE;
 
 void setup() {
   //读取Device id
@@ -117,7 +139,7 @@ void setup() {
     Serial.println("!!! ADS124S08 configuration FAILED! Halting. !!!");
     while (1) { delay(1000); }
   }
-    // --- 完成ADS124S08芯片的初始化 --- //
+  // --- 完成ADS124S08芯片的初始化 --- //
 
   // --- 初始化 ADS124S08 温度测量服务 --- //
   TempService::Config tsCfg;
@@ -125,27 +147,36 @@ void setup() {
   tsCfg.pga_gain = 2;      
   g_tempSvc = new TempService(*ads124s08, tsCfg);
   Serial.println("ADS124S08 configuration successful.");
-  // --- 初始化 AD5941 阻抗测量服务 --- //
-  //Serial.println("Initializing Impedance Service...");
+  // --- 初始化 AD5941 服务结构体 --- //
+
   //初始化应用参数结构体
-  //AppCondCfg_init();
+  AppCondCfg_init();
   AppPHCfg_init();
-  // 5. 配置2线应用参数 (修改Rcal和AIN1)
-  if(AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-    Serial.println("pH Service Init OK!");
+  // 1. 读取并应用电导率参数
+  float saved_K = loadCondParams();
+  AppCondCfg.K_Cell = saved_K;
+  Serial.printf("[Setup] Loaded Cond K_Cell: %.4f\n", saved_K);
+
+  // 2. 读取并应用 pH 参数
+  PhCalibData phData = loadPhParams();
+  AppPHCfg.ZeroOffset_Code = phData.offsetCode;
+  AppPHCfg.Rtia_Value_Ohm = phData.rtiaVal;
+  Serial.printf("[Setup] Loaded pH Offset: %d, Rtia: %.2f\n", phData.offsetCode, phData.rtiaVal);
+
+  // 3. 读取并应用 温度 参数
+  // 假设你的 g_tempSvc 有一个方法叫 setCalib
+  TempCalibData tempData = loadTempParams();
+  if (tempData.valid) {
+     TempService::CalibCoeff c;
+     c.a = tempData.a;
+     c.b = tempData.b;
+     c.c = tempData.c;
+     // c.valid = true; // 如果你的结构体里有 valid
+     g_tempSvc->setCalib(c); 
+     Serial.println("[Setup] Loaded Temp Calibration.");
+  } else {
+     Serial.println("[Setup] No valid Temp Calibration found.");
   }
-  else 
-    {
-        Serial.println("pH Service Init FAILED!");
-    }
-  // Serial.println("Running RTIA Calibration... This may take a moment.");
-  // if(AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-  //   Serial.println("Cond_Impedance Service Init OK!");
-  // }
-  // else 
-  //   {
-  //       Serial.println("Cond_Impedance Service Init FAILED!");
-  //   }
   //完成芯片和服务初始化
   Serial.println("System Initialized");
 }
@@ -156,112 +187,257 @@ void loop() {
   uint32_t tempCount = APPBUFF_SIZE;
   
   handleSerialCommand();
-  // 1. 触发部分：每 500ms
+  // 定时触发部分：每 500ms
   if (millis() - last_time > 500) {
     last_time = millis();
-     AppPHCtrl(PHCTRL_START,0);
-    // 如果不是扫频模式，触发单点测量
-    if (!g_isSweepMode) {
-       //AppCondCtrl(CondCTRL_START, 0);
-    }
   }
-  if (g_isPhMode || g_isCalibratingOffset || g_isCalibratingGain) {
-        if (AppPHISR(AppBuff, &tempCount) == 0) {
-            if (tempCount > 0) {
-                
-                // === 分支 1：如果是校准模式 ===
-                if (g_isCalibratingOffset) {
-                    // 取第一个点作为 Offset (或者你可以做平均)
-                    uint16_t measured_offset = AppBuff[0] & 0xFFFF;
-                    
-                    // 保存到配置中
-                    AppPHCfg.ZeroOffset_Code = measured_offset;
-                    
-                    Serial.printf(">>> Offset Calibrated! New Zero Code: 0x%04X (%d) <<<\n", measured_offset, measured_offset);
-                    
-                    // 校准完成后，自动恢复开关设置到正常模式
-                    AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; // 恢复连接传感器
-                    AppPHCfg.bParaChanged = bTRUE;
-                    AppPHInit(AppBuff, APPBUFF_SIZE); // 重建序列
-                    
-                    g_isCalibratingOffset = false; // 退出校准模式
-                } 
-                else if (g_isCalibratingGain) {
-                  // 1. 获取原始 Code (取第0个点)
-                  uint16_t rawCode = AppBuff[0] & 0xFFFF;
-                  
-                  // 2. 计算去 Offset 后的电压绝对值
-                  // 使用你之前校准好的 ZeroOffset_Code
-                  int32_t diff_code = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
-                  // 1.82V 是量程，32768 是半满量程
-                  float voltage_diff = ((float)diff_code / 32768.0f) * 1.82f;
-                  float abs_volt = fabs(voltage_diff);
-
-                  // 3. 反推真实 RTIA
-                  // 原理: |Volt| = I_ideal * R_tia_real
-                  //       I_ideal = 1.1V / R_ext
-                  // 所以: R_tia_real = (|Volt| * R_ext) / 1.1V
-                  
-                  if (abs_volt > 0.05f) { // 确保有足够电压，防止除零或噪声干扰
-                      float calculated_rtia = (abs_volt * g_calResistorValue) / 1.1f;
-                      
-                      // 4. 更新系统参数
-                      AppPHCfg.Rtia_Value_Ohm = calculated_rtia;
-                      
-                      Serial.printf(">>> Gain Calibrated! Raw:0x%04X, Vdiff:%.4fV, New RTIA: %.2f Ohm <<<\n", 
-                                    rawCode, voltage_diff, calculated_rtia);
-                  } else {
-                      Serial.printf(">>> Error: Signal too low (%.4fV). Is resistor connected? <<<\n", abs_volt);
-                  }
-                  
-                  // 退出校准模式
-                  g_isCalibratingGain = false;
-              }
-                // === 分支 2：如果是普通测量模式 ===
-                else {
-                    PHShowResult(AppBuff, tempCount);
-                    g_isPhMode = false;
-                }
-            }
-        }
-    }
-  if (!g_isSweepMode) {
-      // 检查 AD5941 是否有新数据
+  switch(currentState)
+  {
+    case STATE_IDLE:
+      break;
+    case STATE_TEMP_MEASURE:
+      g_tempSvc->measure(currentTemp);
+      Serial.printf(" Water Temp: %3f \n", currentTemp);
+      currentState = STATE_IDLE;
+      break;
+    case STATE_TEMP_CAL_P1:
+      if (g_tempSvc->recordCalibPoint(0, 25.0)) 
+      {
+         Serial.println("Point 1 Saved!");
+      } else 
+      {
+         Serial.println("Point 1 Failed!");
+      }
+      currentState = STATE_IDLE;
+      break;
+    case STATE_TEMP_CAL_P2:
+      if (g_tempSvc->recordCalibPoint(0, 50.0)) 
+      {
+         Serial.println("Point 2 Saved!");
+      } else 
+      {
+         Serial.println("Point 2 Failed!");
+      }
+      currentState = STATE_IDLE;
+      break;
+    case STATE_TEMP_CAL_P3:
+      if (g_tempSvc->recordCalibPoint(0, 80.0)) 
+      {
+         Serial.println("Point 3 Saved!");
+      } else 
+      {
+         Serial.println("Point 3 Failed!");
+      }
+      currentState = STATE_IDLE;
+      break;
+    case STATE_TEMP_SAVE_CAL:
+      if (g_tempSvc->finishCalibration()) {
+        auto c = g_tempSvc->getCalib();
+        saveTempParams(c.a, c.b, c.c, true);
+        Serial.printf("Calibration DONE! a=%.6f, b=%.6f, c=%.6f\n", c.a, c.b, c.c);
+      } else {
+        Serial.println("Calibration Calculation Failed (Check points?)");
+      }
+      currentState = STATE_IDLE;
+    break;
+    case STATE_TEMP_RESET_CAL:
+      {
+        TempService::CalibCoeff clean; // 默认是 valid=false
+        g_tempSvc->setCalib(clean);
+        Serial.println("Calibration Cleared.");
+        currentState = STATE_IDLE;
+      }
+    break;
+    // === 处理电导率服务 ===
+    case STATE_COND_INIT:
+      g_isCondMode = true;
+      g_ispHMode = false;
+      ChooseSenesingChannel(1);
+      if(AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
+      {
+        AppPHCfg.PHInited = bFALSE;
+        Serial.println("pH Service Init OK!");
+      }
+      else 
+      {
+        Serial.println("Conductivity Service Init FAILED!");
+        currentState = STATE_IDLE;
+        break;
+      } 
+      currentState = STATE_IDLE;
+    break;
+    case STATE_COND_MEASURE:
+      if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
+      {
+        Serial.println("Conductivity Service haven't been initialized");
+        currentState = STATE_IDLE;
+        break;
+      }
       if (AppCondISR(AppBuff, &tempCount) == 0) 
       {
-        // 只有当真正读到数据时 (tempCount > 0)
         if (tempCount > 0) 
         {
           CondShowResult(AppBuff, tempCount);
-          double currentTemp = 0.0;
-          // 1. 此时再去测温度，保证时间和阻抗数据对齐
-          if (g_tempSvc->measure(currentTemp)) {
-             Serial.printf(" Water Temp: %3f \n", currentTemp);
-          } else {
-             Serial.println("Temp Read Failed!");
-          }          
+          currentState = STATE_IDLE;        
         }
       }
-  } 
-  else {
-      // 如果是扫频模式，逻辑稍有不同，这里保留你原本的扫频处理
-      if(AppCondISR(AppBuff, &tempCount) == 0) {
-          if(tempCount > 0) {
-              CondShowResult(AppBuff, tempCount);
-              g_sweepCount++;
-              if (g_sweepCount < g_sweepTotalPoints) {
-                  AppCondCtrl(CondCTRL_START, 0); 
-              } else {
-                  Serial.println(">>> Sweep Completed! <<<");
-                  g_isSweepMode = false;
-                  // 恢复单点参数...
-                  AppCondCfg.SinFreq = 2000.0; // 设回你的默认频率
-                  AppCondCfg.SweepCfg.SweepEn = bFALSE;
-                  AppCondCfg.bParaChanged = bTRUE;
-                  AppCondInit(AppBuff, APPBUFF_SIZE); 
-              }
+    break;
+    case STATE_COND_SWEEP:
+      if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
+      {
+        Serial.println("Conductivity Service haven't been initialized");
+        currentState = STATE_IDLE;
+        break;
+      }
+      if(AppCondISR(AppBuff, &tempCount) == 0) 
+      {
+        if(tempCount > 0) 
+        {
+          CondShowResult(AppBuff, tempCount);
+          g_sweepCount++;
+          if (g_sweepCount < g_sweepTotalPoints) 
+            {
+              AppCondCtrl(CondCTRL_START, 0); 
+              Serial.printf("\n");
+            } 
+          else 
+            {
+              Serial.println(">>> Sweep Completed! <<<");
+              g_isSweepMode = false;
+              AppCondCfg.SinFreq = AppCondCfg.SinFreq; // 设回你的默认频率
+              AppCondCfg.SweepCfg.SweepEn = bFALSE;
+              AppCondCfg.bParaChanged = bTRUE;
+              AppCondInit(AppBuff, APPBUFF_SIZE); 
+              currentState = STATE_IDLE;
+            }
+        }
+      }
+    break;
+    case STATE_COND_CAL:
+      if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
+      {
+        Serial.println("Conductivity Service haven't been initialized");
+        currentState = STATE_IDLE;
+        break;
+      }
+
+      if(AppCondISR(AppBuff, &tempCount) == 0)
+      {
+        if(tempCount > 0) 
+        {
+          float measured_G = ComputeKCell(AppBuff, tempCount);
+          Serial.printf("Conductivity: %f \n",measured_G);
+          float new_K = g_condStdValue / measured_G;
+          AppCondCfg.K_Cell = new_K;
+          saveCondParams(new_K);
+          Serial.println(">>> Calibration Successful! <<<");
+          Serial.printf("Std Solution: %.2f uS/cm\n", g_condStdValue);
+          Serial.printf("Measured G:   %.ascribed4f uS\n", measured_G);
+          Serial.printf("New K_Cell:   %.4f cm^-1\n", new_K);
+          currentState = STATE_IDLE;
           }
       }
+    break;
+    // === 处理pH服务 ===
+    case STATE_PH_INIT:
+      ChooseSenesingChannel(2);
+      g_isCondMode = false;
+      g_ispHMode = true;
+      if(AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
+      {
+        AppCondCfg.CondInited = bFALSE;
+        Serial.println("pH Service Init OK!");
+      }
+      else 
+      {
+        Serial.println("pH Service Init FAILED!");
+        currentState = STATE_IDLE;
+        break;
+      } 
+      currentState = STATE_IDLE;
+    break;
+    case STATE_PH_MEASURE:
+      if(AppPHCfg.PHInited == bFALSE || g_ispHMode == false )
+      {
+        Serial.println("pH Service haven't been initialized");
+        currentState = STATE_IDLE;
+        break;
+      }
+      if (AppPHISR(AppBuff, &tempCount) == 0) 
+      {
+        if (tempCount > 0) 
+        {
+          Serial.println("pH Service Init FAILED!");
+          PHShowResult(AppBuff, tempCount);
+          currentState = STATE_IDLE;
+        }
+      }
+    break;
+    case STATE_PH_CAL_OFFSET:
+      if(AppPHCfg.PHInited == bFALSE || g_ispHMode == false )
+      {
+        Serial.println("pH Service haven't been initialized");
+        currentState = STATE_IDLE;
+        break;
+      }
+      if (AppPHISR(AppBuff, &tempCount) == 0) 
+      {
+        if (tempCount > 0) 
+        {
+          // 取第一个点作为 Offset 
+          uint16_t measured_offset = AppBuff[0] & 0xFFFF;            
+          // 保存到配置中
+          AppPHCfg.ZeroOffset_Code = measured_offset;
+          savePhParams(measured_offset, AppPHCfg.Rtia_Value_Ohm);
+          Serial.printf(">>> Offset Calibrated! New Zero Code: 0x%04X (%d) <<<\n", measured_offset, measured_offset);
+          // 校准完成后，自动恢复开关设置到正常模式
+          AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; // 恢复连接传感器
+          AppPHCfg.bParaChanged = bTRUE;
+          AppPHInit(AppBuff, APPBUFF_SIZE); // 重建序列
+          currentState = STATE_IDLE;
+        }
+      }
+    break;
+    case STATE_PH_CAL_GAIN:
+      if(AppPHCfg.PHInited == bFALSE || g_ispHMode == false )
+      {
+        Serial.println("pH Service haven't been initialized");
+        currentState = STATE_IDLE;
+        break;
+      }
+      if (AppPHISR(AppBuff, &tempCount) == 0) 
+      {
+        if (tempCount > 0) 
+        {
+          // 1. 获取原始 Code (取第0个点)
+          uint16_t rawCode = AppBuff[0] & 0xFFFF;
+          // 2. 计算去 Offset 后的电压绝对值
+          // 使用你之前校准好的 ZeroOffset_Code
+          int32_t diff_code = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
+          // 1.82V 是量程，32768 是半满量程
+          float voltage_diff = ((float)diff_code / 32768.0f) * 1.82f;
+          float abs_volt = fabs(voltage_diff);
+          // 3. 反推真实 RTIA
+          // 原理: |Volt| = I_ideal * R_tia_real
+          //       I_ideal = 1.1V / R_ext
+          // 所以: R_tia_real = (|Volt| * R_ext) / 1.1V
+          if (abs_volt > 0.05f) // 确保有足够电压，防止除零或噪声干扰
+          { 
+            float calculated_rtia = (abs_volt * g_calResistorValue) / 1.1f;
+            // 4. 更新系统参数
+            AppPHCfg.Rtia_Value_Ohm = calculated_rtia;
+            savePhParams(AppPHCfg.ZeroOffset_Code, calculated_rtia);
+            Serial.printf(">>> Gain Calibrated! Raw:0x%04X, Vdiff:%.4fV, New RTIA: %.2f Ohm <<<\n", 
+            rawCode, voltage_diff, calculated_rtia);
+          }
+          else 
+          {
+            Serial.printf(">>> Error: Signal too low (%.4fV). Is resistor connected? <<<\n", abs_volt);
+          }
+        }
+
+      }
+    break;
   }
 }
 
@@ -271,122 +447,151 @@ void handleSerialCommand() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim(); // 去掉回车换行
 
-    // === 指令: "cal 0" -> 校准 0度点 ===
-    if (cmd == "cal 0") {
-      Serial.println("Measuring Point 1 (0.0 C)... Keep sensor stable.");
-      // 假设这杯水是 0.0 度
-      if (g_tempSvc->recordCalibPoint(0, 0.0)) {
-         Serial.println("Point 1 Saved!");
-      } else {
-         Serial.println("Point 1 Failed!");
-      }
+    // === 温度指令 ===
+    // === 指令: "temp read" -> 读取一次温度值 ===
+    if(cmd == "temp read")
+    {
+      Serial.println("[CMD] Measuring Temperature");
+      currentState = STATE_TEMP_MEASURE;
+    }
+    // === 指令: "temp cal 0" -> 校准 0度点 ===
+    else if (cmd == "temp cal 25") {
+      Serial.println("[CMD] Measuring Point 1 (25.0 C)... Keep sensor stable.");
+      currentState = STATE_TEMP_CAL_P1;
     }
     
-    // === 指令: "cal 50" -> 校准 50度点 ===
-    else if (cmd == "cal 50") {
-      Serial.println("Measuring Point 2 (50.0 C)...");
-      if (g_tempSvc->recordCalibPoint(1, 50.0)) {
-         Serial.println("Point 2 Saved!");
-      }
+    // === 指令: "temp cal 50" -> 校准 50度点 ===
+    else if (cmd == "temp cal 50") {
+      Serial.println("[CMD] Measuring Point 2 (50.0 C)...");
+      currentState = STATE_TEMP_CAL_P2;
     }
 
-    // === 指令: "cal 100" -> 校准 100度点 ===
-    else if (cmd == "cal 100") {
-      Serial.println("Measuring Point 3 (100.0 C)...");
-      if (g_tempSvc->recordCalibPoint(2, 100.0)) {
-         Serial.println("Point 3 Saved!");
-      }
+    // === 指令: "temp cal 100" -> 校准 100度点 ===
+    else if (cmd == "temp cal 80") {
+      Serial.println("[CMD] Measuring Point 3 (80.0 C)...");
+      currentState = STATE_TEMP_CAL_P3;
     }
 
-    // === 指令: "save" -> 计算并生效 ===
-    else if (cmd == "save") {
-      Serial.println("Computing coefficients...");
-      if (g_tempSvc->finishCalibration()) {
-        auto c = g_tempSvc->getCalib();
-        Serial.printf("Calibration DONE! a=%.6f, b=%.6f, c=%.6f\n", c.a, c.b, c.c);
-      } else {
-        Serial.println("Calibration Calculation Failed (Check points?)");
-      }
+    // === 指令: "temp save" -> 计算并生效 ===
+    else if (cmd == "temp save") {
+      Serial.println("[CMD] Computing temperature calibration coefficients...");
+      currentState = STATE_TEMP_SAVE_CAL;
     }
-    
-    // === 指令: "reset" -> 清除校准 ===
-    else if (cmd == "reset") {
-      TempService::CalibCoeff clean; // 默认是 valid=false
-      g_tempSvc->setCalib(clean);
-      Serial.println("Calibration Cleared.");
+
+    // === 指令: "temp reset" -> 清除温度校准 ===
+    else if (cmd == "temp reset") {
+      Serial.println("[CMD] Resetting temperature calibration coefficients...");
+      currentState = STATE_TEMP_RESET_CAL;
     }
-    // === 新增: "imp" -> 触发一次阻抗测量 ===
-    else if (cmd == "Cond") {
-       Serial.println("Triggering Cond_Impedance Measurement (1000Hz)...");
-       // 所以这里调用它会直接让 AD5941 跑一次 SRAM 里的 SEQID_0 序列
-       AppCondCtrl(CondCTRL_START, 0);
+
+    // === 电导率指令 ===
+    // === 指令: "cond read" -> 触发一次阻抗测量 ===
+    else if (cmd == "cond init") {
+      Serial.println("[CMD] Init conductivity service...");      
+      currentState = STATE_COND_INIT;
     }    
 
-        else if (cmd == "Condsweep") {
-       if (g_isSweepMode) {
-           Serial.println("Already sweeping!");
-           return;
-       }
-       
-       Serial.println("[CMD] Starting Frequency Sweep (1kHz -> 100kHz)...");
-       // 1. 配置参数
-       AppCondCfg.SweepCfg.SweepEn = bTRUE;
-       AppCondCfg.ReDoRtiaCal = bTRUE;
-       AppCondCfg.bParaChanged = bTRUE;   
-       // 3. 初始化服务 (这会计算出 SweepNextFreq = 2000.0)
-       if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-           g_isSweepMode = true;
-           g_sweepCount = 0; 
-           g_sweepTotalPoints = AppCondCfg.SweepCfg.SweepPoints;
-           // 4. 触发第 1 个点 (1000Hz)
-           AppCondCtrl(CondCTRL_START, 0);
+    else if (cmd == "cond read") {
+      if (!g_isCondMode) 
+      {
+        Serial.println("Not in Conductivity Mode");
+        return;
+      }
+      ChooseSenesingChannel(1);
+      Serial.println("[CMD] Triggering Cond_Impedance Measurement...");
+      AppCondCtrl(CondCTRL_START, 0);
+      currentState = STATE_COND_MEASURE;
+    }    
+
+    else if (cmd == "cond cal") {
+      if (!g_isCondMode) 
+      {
+        Serial.println("Not in Conductivity Mode");
+        return;
+      }
+      Serial.println("[CMD] Starting K_Cell calibration");
+      ChooseSenesingChannel(1);
+      AppCondCtrl(CondCTRL_START, 0);
+      currentState = STATE_COND_CAL;
+    } 
+
+    else if (cmd == "cond sweep") {
+      if (g_isSweepMode) 
+      {
+        Serial.println("Already sweeping!");
+        return;
+      }
+      if (!g_isCondMode) 
+      {
+        Serial.println("Not in Conductivity Mode");
+        return;
+      }
+      ChooseSenesingChannel(1);
+      Serial.println("[CMD] Starting Frequency Sweep (1kHz -> 100kHz)...");
+      AppCondCfg.SweepCfg.SweepEn = bTRUE;
+      AppCondCfg.ReDoRtiaCal = bTRUE;
+      AppCondCfg.bParaChanged = bTRUE;   
+      if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
+      {
+          g_isSweepMode = true;
+          g_sweepCount = 0; 
+          g_sweepTotalPoints = AppCondCfg.SweepCfg.SweepPoints;
+          currentState = STATE_COND_SWEEP;
+          AppCondCtrl(CondCTRL_START, 0);
        } else {
            Serial.println("Sweep Init Failed!");
        }
     }
-    else if (cmd == "ph read") {
-      Serial.println("Triggering Single pH Measurement...");
-      // 1. 切换模式标志
-      g_isPhMode = true;
-      g_isSweepMode = false; // 确保不处于扫频模式
+    // === pH值指令 ===
+    else if (cmd == "ph init") 
+    {
+      ChooseSenesingChannel(2);
+      Serial.println("[CMD] Initializing pH Measurement...");
+      currentState = STATE_PH_INIT;
+    }
+    else if (cmd == "ph read") 
+    {
+      if (!g_ispHMode) 
+      {
+        Serial.println("Not in pH Mode");
+        return;
+      }
+      ChooseSenesingChannel(2);
+      Serial.println("[CMD] Triggering Single pH Measurement...");
+      currentState = STATE_PH_MEASURE;
       AppPHCtrl(PHCTRL_START, 0);
-  }
+    }
     else if (cmd == "ph cal offset") {
+      if (!g_ispHMode) 
+      {
+        Serial.println("Not in pH Mode");
+        return;
+      }
+      ChooseSenesingChannel(2);
       Serial.println("[CMD] Calibrating pH Offset (Disconnecting Input)...");
-      
-      // 1. 修改配置：断开所有开关 (SWT_OPEN)
-      // 这样 ADC 测量的就是系统本身的底噪/偏置
-
+      // 1. 修改配置：断开所有开关
       AppPHCfg.TswitchSel =  SWT_TRTIA; 
-
       // 2. 标记参数已改变，并重新初始化序列
       AppPHCfg.bParaChanged = bTRUE;
       if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
           // 3. 设置校准标志位，并触发一次测量
           g_isCalibratingOffset = true;
-          g_isPhMode = false; // 暂停普通模式的打印
           AppPHCtrl(PHCTRL_START, 0);
+          currentState = STATE_PH_CAL_OFFSET;
       } else {
-          Serial.println("Cal Init Failed!");
+          Serial.println("pH Cal Init Failed!");
       }
     }
-    
-    // === 恢复正常测量模式指令 (可选) ===
-    else if (cmd == "ph reset") {
-       // 恢复默认开关连接
-       AppPHCfg.DswitchSel = SWD_OPEN;
-       AppPHCfg.PswitchSel = SWP_PL|SWP_PL2;
-       AppPHCfg.NswitchSel = SWN_NL|SWN_NL2;
-       AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
-       AppPHCfg.bParaChanged = bTRUE;
-       AppPHInit(AppBuff, APPBUFF_SIZE);
-       Serial.println("Restored to Normal pH Mode.");
-    } 
     else if (cmd.startsWith("ph cal gain")) {
+      if (!g_ispHMode) 
+      {
+        Serial.println("Not in pH Mode");
+        return;
+      }
+      ChooseSenesingChannel(2);
         // 1. 解析输入的电阻值
         String valStr = cmd.substring(11); // "ph cal gain" 长度是 11
         valStr.trim();
-        
         if (valStr.length() > 0) {
             float r_val = valStr.toFloat();
             if (r_val > 0) {
@@ -399,15 +604,12 @@ void handleSerialCommand() {
                 AppPHCfg.PswitchSel = SWP_PL | SWP_PL2;
                 AppPHCfg.NswitchSel = SWN_NL | SWN_NL2;
                 AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
-
                 // 3. 重新初始化序列以应用开关设置
                 AppPHCfg.bParaChanged = bTRUE;
                 if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
                     // 4. 设置标志位并触发
-                    g_isCalibratingGain = true;
-                    g_isPhMode = false; // 暂停普通打印
-                    g_isCalibratingOffset = false;
                     AppPHCtrl(PHCTRL_START, 0);
+                    currentState = STATE_PH_CAL_GAIN;
                 } else {
                     Serial.println("Gain Cal Init Failed!");
                 }
@@ -417,6 +619,29 @@ void handleSerialCommand() {
         } else {
             Serial.println("Usage: ph cal gain <ohms> (e.g., ph cal gain 1000)");
         }
+    }
+    // === 指令: "factory reset" -> 恢复默认校准参数 ===
+    else if (cmd == "factory reset") {
+      Serial.println("[CMD] Resetting to Factory Defaults...");
+      // 1. 清除 Flash 中的数据
+      resetCalibrationParams();
+      // 2. 立即恢复 RAM 中的变量为默认值 (热重载)
+      // --- 电导率默认值 ---
+      AppCondCfg.K_Cell = 1.0f; 
+      Serial.println("   Cond K_Cell -> 1.0");
+
+      // --- pH 默认值 ---
+      AppPHCfg.ZeroOffset_Code = 32768; // ADC半量程
+      AppPHCfg.Rtia_Value_Ohm = AppCondCfg.HstiaRtiaSel;
+      Serial.println("   pH Offset -> 32768, Gain -> 1000.0");
+
+      // --- 温度默认值 ---
+      TempService::CalibCoeff clean; // 默认构造函数通常是全0且valid=false
+      g_tempSvc->setCalib(clean);
+      Serial.println("   Temp Cal -> Cleared");
+      // 3. 强制重新初始化各个服务，让参数生效
+      //    (由于参数改了，需要告诉 AD5941 重新加载)
+      Serial.println(">>> Factory Reset Complete. Please Restart or Init Sensors. <<<");
     }
 
   }

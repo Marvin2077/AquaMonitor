@@ -677,20 +677,42 @@ AD5940Err AppCondISR(void *pBuff, uint32_t *pCount)
 
   return 0;
 }
+float ComputeKCell(uint32_t *pData, uint32_t DataCount)
+{ 
+  float freq;
+  fImpCar_Type *pImp = (fImpCar_Type*)pData;
+  AppCondCtrl(CondCTRL_GETFREQ, &freq);
+for(int i=0; i<DataCount; i++)
+  {
+    float R = pImp[i].Real;   // 阻抗实部 (Resistance)
+    float X = pImp[i].Image;  // 阻抗虚部 (Reactance)
+    
+    // 1. 计算阻抗模的平方: |Z|^2 = R^2 + X^2
+    float magSq = R*R + X*X;
+    
+    float Conductance_S = 0.0f; // 单位：西门子 (Siemens)
+    
+    // 2. 计算电导 (Conductance, G). 
+    // 公式: Y = 1/Z = (R - jX) / (R^2 + X^2)
+    // 电导 G = Y的实部 = R / (R^2 + X^2)
+    if(magSq > 0.0f)
+    {
+        Conductance_S = R / magSq;
+    }
+    // 3. 转换为微西门子 (uS)，因为自来水的电导通常在 uS 级别
+    float Conductance_uS = Conductance_S * 1e6f;
+    return Conductance_uS;
+  }
 
+}
 /* 修改后的显示函数，增加电导计算 */
 int32_t CondShowResult(uint32_t *pData, uint32_t DataCount)
 {
   float freq;
-  
-  // 定义电极常数 (Cell Constant K). 
-  // 对于自来水测量，你需要校准这个值。如果不知道，暂时设为 1.0。
-  // 电导率 (S/m) = 电导 (S) * K (1/m)
-  const float K_CELL = 1.0f; 
 
+  // 电导率 (S/m) = 电导 (S) * K (1/m)
   fImpCar_Type *pImp = (fImpCar_Type*)pData;
   AppCondCtrl(CondCTRL_GETFREQ, &freq);
-
   /* Process data */
   for(int i=0; i<DataCount; i++)
   {
@@ -709,23 +731,19 @@ int32_t CondShowResult(uint32_t *pData, uint32_t DataCount)
     {
         Conductance_S = R / magSq;
     }
-
     // 3. 转换为微西门子 (uS)，因为自来水的电导通常在 uS 级别
     float Conductance_uS = Conductance_S * 1e6f;
 
-    // 4. (可选) 计算电导率 (Conductivity)，需要乘以电极常数 K
-    float Conductivity_uS_cm = Conductance_uS * K_CELL;
+    // 4. 计算电导率 (Conductivity)，需要乘以电极常数 K
+    float Conductivity_uS_cm = Conductance_uS * AppCondCfg.K_Cell;
 
-    // 打印结果
-    // RzMag: 阻抗模值
-    // G(uS): 电导
     Serial.printf("Freq: %.2f, RzMag: %.2f Ohm, Phase: %.2f, Real=%.2f, Image=%.2f, G: %.4f uS ", 
                   freq, 
                   AD5940_ComplexMag(&pImp[i]), 
                   AD5940_ComplexPhase(&pImp[i])*180/MATH_PI, 
                   R, X,
                   Conductance_uS);
-                  
+    Serial.printf("Conductivity %f\n",Conductivity_uS_cm);
     /* 如果你需要查看原本的实部虚部，可以取消下面注释 */
     // Serial.printf("Debug: Real=%.2f, Image=%.2f\n", R, X);
   }

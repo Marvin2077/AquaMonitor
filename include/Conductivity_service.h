@@ -33,6 +33,7 @@ typedef struct
   int32_t NumOfData;            /* 默认为 '-1'。如果希望引擎在获取 NumofData 个数据后停止，请在此处设置该值。否则，将其设置为 '-1'，表示永不停止。 */
   float SinFreq;                /* 激励信号的频率 */
   float RcalVal;                /* Rcal 电阻值（单位：欧姆） */
+  float K_Cell;                 /* 电极常数，单位 cm^-1。默认为 1.0 */
   uint32_t PwrMod;              /* 控制芯片功耗模式 (LP/HP) */
   float DacVoltPP;              /* 最终激励电压为 DacVoltPP*DAC_PGA*EXCIT_GAIN, DAC_PGA= 1 或 0.2, EXCIT_GAIN=2 或 0.25。DAC 输出电压（单位：mV 峰峰值）。最大值为 800mVpp。峰峰值电压 */
   uint32_t ExcitBufGain;        /* 从 EXCITBUFGAIN_2, EXCITBUFGAIN_0P25 中选择 */
@@ -67,7 +68,6 @@ typedef struct
   SEQInfo_Type MeasureSeqInfo;
   BoolFlag StopRequired;          /* FIFO 准备就绪后，停止测量序列 */
   uint32_t FifoDataCount;         /* 计算阻抗已被测量的次数 */
-/* 结束 */
 }AppCondCfg_Type;
 extern AppCondCfg_Type AppCondCfg; 
 
@@ -83,6 +83,6 @@ AD5940Err AppCondISR(void *pBuff, uint32_t *pCount);
 AD5940Err AppCondCtrl(int32_t BcmCtrl, void *pPara);
 AD5940Err AppCondCheckFreq(float freq);
 AD5940Err AppCondCfg_init(void);
-//int32_t AD5940PlatformCfg(void);
 int32_t CondShowResult(uint32_t *pData, uint32_t DataCount);
+float ComputeKCell(uint32_t *pData, uint32_t DataCount);
 #endif

@@ -231,14 +231,12 @@ AD5940Err AppPHSeqMeasureGen(void)
   clks_cal.ADCAvgNum = ADCAVGNUM_16;
   clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;;
   AD5940_ClksCalculate(&clks_cal,&WaitClks);
-  //WaitClks = (WaitClks * 2) +500;
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
   //  开启电源
   AD5940_AFECtrlS(AFECTRL_ADCPWR | AFECTRL_HSTIAPWR | AFECTRL_SINC2NOTCH | AFECTRL_INAMPPWR | AFECTRL_EXTBUFPWR, bTRUE);
   AD5940_SEQGenInsert(SEQ_WAIT(16*80));
-
   //  开启 ADC 转换
   AD5940_AFECtrlS(AFECTRL_ADCCNV, bTRUE); 
   // 2. 等待转换完成
