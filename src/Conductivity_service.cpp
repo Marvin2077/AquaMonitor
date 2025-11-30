@@ -43,9 +43,9 @@ AD5940Err AppCondCfg_init(){
     AppCondCfg.TswitchSel = SWN_AIN0;
 
     AppCondCfg.SweepCfg.SweepEn = bFALSE;
-    AppCondCfg.SweepCfg.SweepStart = 1000.0;
-    AppCondCfg.SweepCfg.SweepStop = 10000.0;
-    AppCondCfg.SweepCfg.SweepPoints = 10;
+    AppCondCfg.SweepCfg.SweepStart = 2000.0;
+    AppCondCfg.SweepCfg.SweepStop = 200000.0;
+    AppCondCfg.SweepCfg.SweepPoints = 100;
     AppCondCfg.SweepCfg.SweepLog = bFALSE;
     AppCondCfg.SweepCfg.SweepIndex = 0;
 

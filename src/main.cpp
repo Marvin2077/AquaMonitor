@@ -256,7 +256,7 @@ void loop() {
       if(AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
       {
         AppPHCfg.PHInited = bFALSE;
-        Serial.println("pH Service Init OK!");
+        Serial.println("Conductivity Service Init OK!");
       }
       else 
       {
@@ -429,10 +429,12 @@ void loop() {
             savePhParams(AppPHCfg.ZeroOffset_Code, calculated_rtia);
             Serial.printf(">>> Gain Calibrated! Raw:0x%04X, Vdiff:%.4fV, New RTIA: %.2f Ohm <<<\n", 
             rawCode, voltage_diff, calculated_rtia);
+            currentState = STATE_IDLE;
           }
           else 
           {
             Serial.printf(">>> Error: Signal too low (%.4fV). Is resistor connected? <<<\n", abs_volt);
+            currentState = STATE_IDLE;
           }
         }
 
