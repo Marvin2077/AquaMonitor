@@ -39,8 +39,8 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.LpPaPwrEn = bTRUE;
     AppPHCfg.LpTiaPwrEn = bTRUE;
     // LPTIASW(12)|LPTIASW(13)
-    AppPHCfg.LpTiaSW = LPTIASW(12)|LPTIASW(13)|LPTIASW(2)|LPTIASW(10)\
-          |LPTIASW(5)|LPTIASW(9); /* Close these switches to make sure LP PA amplifier is closed loop */
+    //AppPHCfg.LpTiaSW = LPTIASW(12)|LPTIASW(13)|LPTIASW(2)|LPTIASW(10)|LPTIASW(5)|LPTIASW(9); /* Close these switches to make sure LP PA amplifier is closed loop */
+    AppPHCfg.LpTiaSW = 0; 
     AppPHCfg.LpTiaRf = LPTIARF_SHORT;
     AppPHCfg.LpTiaRtia = LPTIARTIA_200R;
     AppPHCfg.LpTiaRload = LPTIARLOAD_100R;
@@ -50,11 +50,11 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.HstiaCtia = 16;
     AppPHCfg.HstiaDeRload = HSTIADERLOAD_OPEN;
     AppPHCfg.HstiaDeRtia = HSTIADERTIA_OPEN;
-    AppPHCfg.HstiaRtiaSel = HSTIARTIA_1K;
+    AppPHCfg.HstiaRtiaSel = HSTIARTIA_160K;
     //switch Matrix
     AppPHCfg.DswitchSel = SWD_OPEN;
     AppPHCfg.PswitchSel = SWP_PL|SWP_PL2;
-    AppPHCfg.NswitchSel = SWN_NL|SWN_NL2;
+    AppPHCfg.NswitchSel = SWN_OPEN;
     AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA;
     //ADC Filter
 

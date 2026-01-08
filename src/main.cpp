@@ -204,31 +204,36 @@ void loop() {
       if (g_tempSvc->recordCalibPoint(0, 25.0)) 
       {
          Serial.println("Point 1 Saved!");
+         currentState = STATE_IDLE;     
       } else 
       {
          Serial.println("Point 1 Failed!");
+         currentState = STATE_IDLE;     
       }
       currentState = STATE_IDLE;
       break;
     case STATE_TEMP_CAL_P2:
-      if (g_tempSvc->recordCalibPoint(0, 50.0)) 
+      if (g_tempSvc->recordCalibPoint(1, 35.0)) 
       {
          Serial.println("Point 2 Saved!");
+         currentState = STATE_IDLE;
       } else 
       {
          Serial.println("Point 2 Failed!");
+         currentState = STATE_IDLE;         
       }
-      currentState = STATE_IDLE;
       break;
     case STATE_TEMP_CAL_P3:
-      if (g_tempSvc->recordCalibPoint(0, 80.0)) 
+      if (g_tempSvc->recordCalibPoint(2, 50.0)) 
       {
          Serial.println("Point 3 Saved!");
+         currentState = STATE_IDLE;
       } else 
       {
          Serial.println("Point 3 Failed!");
+         currentState = STATE_IDLE;
       }
-      currentState = STATE_IDLE;
+ 
       break;
     case STATE_TEMP_SAVE_CAL:
       if (g_tempSvc->finishCalibration()) {
@@ -367,7 +372,6 @@ void loop() {
       {
         if (tempCount > 0) 
         {
-          Serial.println("pH Service Init FAILED!");
           PHShowResult(AppBuff, tempCount);
           currentState = STATE_IDLE;
         }
@@ -456,21 +460,21 @@ void handleSerialCommand() {
       Serial.println("[CMD] Measuring Temperature");
       currentState = STATE_TEMP_MEASURE;
     }
-    // === 指令: "temp cal 0" -> 校准 0度点 ===
+    // === 指令: "temp cal 25" -> 校准 0度点 ===
     else if (cmd == "temp cal 25") {
       Serial.println("[CMD] Measuring Point 1 (25.0 C)... Keep sensor stable.");
       currentState = STATE_TEMP_CAL_P1;
     }
     
     // === 指令: "temp cal 50" -> 校准 50度点 ===
-    else if (cmd == "temp cal 50") {
-      Serial.println("[CMD] Measuring Point 2 (50.0 C)...");
+    else if (cmd == "temp cal 35") {
+      Serial.println("[CMD] Measuring Point 2 (35.0 C)...");
       currentState = STATE_TEMP_CAL_P2;
     }
 
     // === 指令: "temp cal 100" -> 校准 100度点 ===
-    else if (cmd == "temp cal 80") {
-      Serial.println("[CMD] Measuring Point 3 (80.0 C)...");
+    else if (cmd == "temp cal 50") {
+      Serial.println("[CMD] Measuring Point 3 (50.0 C)...");
       currentState = STATE_TEMP_CAL_P3;
     }
 
@@ -604,7 +608,7 @@ void handleSerialCommand() {
                 // 如果之前跑了 offset 校准，开关可能是断开的，这里要连回去
                 AppPHCfg.DswitchSel = SWD_OPEN;
                 AppPHCfg.PswitchSel = SWP_PL | SWP_PL2;
-                AppPHCfg.NswitchSel = SWN_NL | SWN_NL2;
+                AppPHCfg.NswitchSel = SWN_OPEN;
                 AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
                 // 3. 重新初始化序列以应用开关设置
                 AppPHCfg.bParaChanged = bTRUE;
