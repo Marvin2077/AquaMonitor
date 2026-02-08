@@ -466,13 +466,13 @@ void handleSerialCommand() {
       currentState = STATE_TEMP_CAL_P1;
     }
     
-    // === 指令: "temp cal 50" -> 校准 50度点 ===
+    // === 指令: "temp cal 35" -> 校准 35度点 ===
     else if (cmd == "temp cal 35") {
       Serial.println("[CMD] Measuring Point 2 (35.0 C)...");
       currentState = STATE_TEMP_CAL_P2;
     }
 
-    // === 指令: "temp cal 100" -> 校准 100度点 ===
+    // === 指令: "temp cal 50" -> 校准 50度点 ===
     else if (cmd == "temp cal 50") {
       Serial.println("[CMD] Measuring Point 3 (50.0 C)...");
       currentState = STATE_TEMP_CAL_P3;
