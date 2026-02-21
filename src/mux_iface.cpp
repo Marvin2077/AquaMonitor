@@ -37,10 +37,11 @@ void ChooseSenesingChannel(int channel)
         //余氯
         break;
     case 3:
-        //ADDR1 - 1 ADDR0 - 0 -> S1A & S1B
+        //ADDR1 - 1 ADDR0 - 0 -> S3A & S3B
         digitalWrite(CHANNEL_MUX_ADDR1,HIGH);
         digitalWrite(CHANNEL_MUX_ADDR0,LOW);
         break;
+        // pH值
     default:
         //ADDR0 - 0 ADDR1 - 0 -> S1A & S1B
         Serial.print("Default Sensing Channel");

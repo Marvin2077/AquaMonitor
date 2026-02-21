@@ -68,6 +68,7 @@ enum SystemState {
   STATE_TEMP_CAL_P3,      // 温度校准点3
   STATE_TEMP_SAVE_CAL,    // 温度保存校准
   STATE_TEMP_RESET_CAL,   // 温度重置校准
+  STATE_TEMP_RESISTANCE,  // 读取原始电阻值
   STATE_COND_INIT,        // 电导率初始化
   STATE_COND_MEASURE,     // 电导率测量
   STATE_COND_SWEEP,       // 电导率扫频
@@ -253,6 +254,17 @@ void loop() {
         currentState = STATE_IDLE;
       }
     break;
+    case STATE_TEMP_RESISTANCE:
+    {
+      double r_ohm = 0.0;
+      if (g_tempSvc->readResistance(r_ohm)) {
+        Serial.printf("Resistance: %.2f Ohm\n", r_ohm);
+      } else {
+        Serial.println("[ERR] Resistance read failed");
+      }
+      currentState = STATE_IDLE;
+      break;
+    }
     // === 处理电导率服务 ===
     case STATE_COND_INIT:
       g_isCondMode = true;
@@ -345,7 +357,7 @@ void loop() {
     break;
     // === 处理pH服务 ===
     case STATE_PH_INIT:
-      ChooseSenesingChannel(2);
+      ChooseSenesingChannel(3);
       g_isCondMode = false;
       g_ispHMode = true;
       if(AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
@@ -488,6 +500,11 @@ void handleSerialCommand() {
     else if (cmd == "temp reset") {
       Serial.println("[CMD] Resetting temperature calibration coefficients...");
       currentState = STATE_TEMP_RESET_CAL;
+    }
+    // === 指令: "temp resistance" -> 读取原始电阻值 ===
+    else if (cmd == "temp resistance") {
+      Serial.println("[CMD] Reading raw resistance...");
+      currentState = STATE_TEMP_RESISTANCE;
     }
 
     // === 电导率指令 ===
