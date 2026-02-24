@@ -565,6 +565,26 @@ void handleSerialCommand() {
            Serial.println("Sweep Init Failed!");
        }
     }
+    
+    else if (cmd.startsWith("cond freq ")) {
+      if (!g_isCondMode) 
+      { 
+        Serial.println("Not in Conductivity Mode"); return; 
+      }
+      float newFreq = cmd.substring(10).toFloat();
+      if (newFreq < 2000.0 || newFreq > 200000.0) {
+          Serial.println("[ERR] Freq out of range (2000~200000 Hz)");
+          return;
+      }
+      AppCondCfg.SinFreq = newFreq;
+      AppCondCfg.ReDoRtiaCal = bTRUE;
+      AppCondCfg.bParaChanged = bTRUE;
+      if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+          Serial.printf("[COND] Frequency set to %.1f Hz\n", newFreq);
+      } else {
+          Serial.println("[ERR] Frequency set failed");
+      }
+   }
     // === pH值指令 ===
     else if (cmd == "ph init") 
     {
