@@ -20,14 +20,14 @@ AD5940Err AppCondCfg_init(){
     AppCondCfg.RcalVal = 1000.0; /* 10k 欧姆 */
 
     AppCondCfg.PwrMod = AFEPWR_LP;
-    AppCondCfg.HstiaRtiaSel = HSTIARTIA_1K;
-    AppCondCfg.CtiaSel = 16;
+    AppCondCfg.HstiaRtiaSel = HSTIARTIA_5K;
+    AppCondCfg.CtiaSel = 4;
     AppCondCfg.ExcitBufGain = EXCITBUFGAIN_2;
     AppCondCfg.HsDacGain = HSDACGAIN_1;
     AppCondCfg.HsDacUpdateRate = 7;
     AppCondCfg.DacVoltPP = 600.0;
 
-    AppCondCfg.SinFreq = 50000.0; /* 50000 赫兹 */
+    AppCondCfg.SinFreq = 10000.0; /* 10000 赫兹 */
 
     AppCondCfg.ADCPgaGain = ADCPGA_1P5;
     AppCondCfg.ADCSinc3Osr = ADCSINC3OSR_2;
@@ -43,9 +43,9 @@ AD5940Err AppCondCfg_init(){
     AppCondCfg.TswitchSel = SWN_AIN0;
 
     AppCondCfg.SweepCfg.SweepEn = bFALSE;
-    AppCondCfg.SweepCfg.SweepStart = 2000.0;
-    AppCondCfg.SweepCfg.SweepStop = 200000.0;
-    AppCondCfg.SweepCfg.SweepPoints = 100;
+    AppCondCfg.SweepCfg.SweepStart = 1000.0;
+    AppCondCfg.SweepCfg.SweepStop = 50000.0;
+    AppCondCfg.SweepCfg.SweepPoints = 50;
     AppCondCfg.SweepCfg.SweepLog = bFALSE;
     AppCondCfg.SweepCfg.SweepIndex = 0;
 
