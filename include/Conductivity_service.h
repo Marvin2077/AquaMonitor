@@ -83,6 +83,6 @@ AD5940Err AppCondISR(void *pBuff, uint32_t *pCount);
 AD5940Err AppCondCtrl(int32_t BcmCtrl, void *pPara);
 AD5940Err AppCondCheckFreq(float freq);
 AD5940Err AppCondCfg_init(void);
-int32_t CondShowResult(uint32_t *pData, uint32_t DataCount);
+int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sweepIndex, int sweepTotal);
 float ComputeKCell(uint32_t *pData, uint32_t DataCount);
 #endif

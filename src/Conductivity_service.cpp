@@ -705,47 +705,43 @@ for(int i=0; i<DataCount; i++)
   }
 
 }
-/* 修改后的显示函数，增加电导计算 */
-int32_t CondShowResult(uint32_t *pData, uint32_t DataCount)
+/* 修改后的显示函数，增加电导计算，支持单次测量和扫频两种输出格式 */
+int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sweepIndex, int sweepTotal)
 {
   float freq;
 
-  // 电导率 (S/m) = 电导 (S) * K (1/m)
   fImpCar_Type *pImp = (fImpCar_Type*)pData;
   AppCondCtrl(CondCTRL_GETFREQ, &freq);
-  /* Process data */
   for(int i=0; i<DataCount; i++)
   {
-    float R = pImp[i].Real;   // 阻抗实部 (Resistance)
-    float X = pImp[i].Image;  // 阻抗虚部 (Reactance)
-    
-    // 1. 计算阻抗模的平方: |Z|^2 = R^2 + X^2
+    float R = pImp[i].Real;
+    float X = pImp[i].Image;
     float magSq = R*R + X*X;
-    
-    float Conductance_S = 0.0f; // 单位：西门子 (Siemens)
-    
-    // 2. 计算电导 (Conductance, G). 
-    // 公式: Y = 1/Z = (R - jX) / (R^2 + X^2)
-    // 电导 G = Y的实部 = R / (R^2 + X^2)
+    float Conductance_S = 0.0f;
     if(magSq > 0.0f)
     {
         Conductance_S = R / magSq;
     }
-    // 3. 转换为微西门子 (uS)，因为自来水的电导通常在 uS 级别
     float Conductance_uS = Conductance_S * 1e6f;
-
-    // 4. 计算电导率 (Conductivity)，需要乘以电极常数 K
     float Conductivity_uS_cm = Conductance_uS * AppCondCfg.K_Cell;
+    float mag   = AD5940_ComplexMag(&pImp[i]);
+    float phase = AD5940_ComplexPhase(&pImp[i]) * 180.0f / MATH_PI;
 
-    Serial.printf("Freq: %.2f, RzMag: %.2f Ohm, Phase: %.2f, Real=%.2f, Image=%.2f, G: %.4f uS ", 
-                  freq, 
-                  AD5940_ComplexMag(&pImp[i]), 
-                  AD5940_ComplexPhase(&pImp[i])*180/MATH_PI, 
-                  R, X,
-                  Conductance_uS);
-    Serial.printf("Conductivity %f\n",Conductivity_uS_cm);
-    /* 如果你需要查看原本的实部虚部，可以取消下面注释 */
-    // Serial.printf("Debug: Real=%.2f, Image=%.2f\n", R, X);
+    if(isSweep)
+    {
+      // $COND,SWEEP,<point_index>,<total_points>,<freq_Hz>,<mag_Ohm>,<phase_deg>,<real_Ohm>,<imag_Ohm>,<G_uS>,<conductivity_uS_cm>*
+      Serial.printf("$COND,SWEEP,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f*\n",
+                    sweepIndex, sweepTotal,
+                    freq, mag, phase, R, X,
+                    Conductance_uS, Conductivity_uS_cm);
+    }
+    else
+    {
+      // $COND,MEAS,<freq_Hz>,<mag_Ohm>,<phase_deg>,<real_Ohm>,<imag_Ohm>,<G_uS>,<conductivity_uS_cm>*
+      Serial.printf("$COND,MEAS,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f,%.4f*\n",
+                    freq, mag, phase, R, X,
+                    Conductance_uS, Conductivity_uS_cm);
+    }
   }
   return 0;
 }

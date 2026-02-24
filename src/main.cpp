@@ -119,7 +119,7 @@ void setup() {
 
   // --- 初始化 ADS124S08 --- //
   Serial.println("======================================");
-  Serial.println(" ADS124S08 Setup Start ");
+  Serial.println(" ADS124S08 Setup Start AAAA");
   Serial.println("======================================");
    // 1)  初始化 ADS124S08 SPI 总线
   static SpiDevice ads_spidev(CS_ADS124S08, 4000000, MSBFIRST, SPI_MODE1);
@@ -270,61 +270,59 @@ void loop() {
       g_isCondMode = true;
       g_ispHMode = false;
       ChooseSenesingChannel(1);
-      if(AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
+      if(AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK)
       {
         AppPHCfg.PHInited = bFALSE;
-        Serial.println("Conductivity Service Init OK!");
+        Serial.println("$COND,INIT,OK*");
       }
-      else 
+      else
       {
-        Serial.println("Conductivity Service Init FAILED!");
+        Serial.println("$ERR,COND,Init failed*");
         currentState = STATE_IDLE;
         break;
-      } 
+      }
       currentState = STATE_IDLE;
     break;
     case STATE_COND_MEASURE:
       if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
       {
-        Serial.println("Conductivity Service haven't been initialized");
+        Serial.println("$ERR,COND,Not initialized*");
         currentState = STATE_IDLE;
         break;
       }
-      if (AppCondISR(AppBuff, &tempCount) == 0) 
+      if (AppCondISR(AppBuff, &tempCount) == 0)
       {
-        if (tempCount > 0) 
+        if (tempCount > 0)
         {
-          CondShowResult(AppBuff, tempCount);
-          currentState = STATE_IDLE;        
+          CondShowResult(AppBuff, tempCount, false, 0, 0);
+          currentState = STATE_IDLE;
         }
       }
     break;
     case STATE_COND_SWEEP:
       if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
       {
-        Serial.println("Conductivity Service haven't been initialized");
+        Serial.println("$ERR,COND,Not initialized*");
         currentState = STATE_IDLE;
         break;
       }
-      if(AppCondISR(AppBuff, &tempCount) == 0) 
+      if(AppCondISR(AppBuff, &tempCount) == 0)
       {
-        if(tempCount > 0) 
+        if(tempCount > 0)
         {
-          CondShowResult(AppBuff, tempCount);
+          CondShowResult(AppBuff, tempCount, true, g_sweepCount + 1, g_sweepTotalPoints);
           g_sweepCount++;
-          if (g_sweepCount < g_sweepTotalPoints) 
+          if (g_sweepCount < g_sweepTotalPoints)
             {
-              AppCondCtrl(CondCTRL_START, 0); 
-              Serial.printf("\n");
-            } 
-          else 
+              AppCondCtrl(CondCTRL_START, 0);
+            }
+          else
             {
-              Serial.println(">>> Sweep Completed! <<<");
+              Serial.println("$COND,SWEEP_END*");
               g_isSweepMode = false;
-              AppCondCfg.SinFreq = AppCondCfg.SinFreq; // 设回你的默认频率
               AppCondCfg.SweepCfg.SweepEn = bFALSE;
               AppCondCfg.bParaChanged = bTRUE;
-              AppCondInit(AppBuff, APPBUFF_SIZE); 
+              AppCondInit(AppBuff, APPBUFF_SIZE);
               currentState = STATE_IDLE;
             }
         }
@@ -333,26 +331,23 @@ void loop() {
     case STATE_COND_CAL:
       if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
       {
-        Serial.println("Conductivity Service haven't been initialized");
+        Serial.println("$ERR,COND,Not initialized*");
         currentState = STATE_IDLE;
         break;
       }
 
       if(AppCondISR(AppBuff, &tempCount) == 0)
       {
-        if(tempCount > 0) 
+        if(tempCount > 0)
         {
           float measured_G = ComputeKCell(AppBuff, tempCount);
-          Serial.printf("Conductivity: %f \n",measured_G);
           float new_K = g_condStdValue / measured_G;
           AppCondCfg.K_Cell = new_K;
           saveCondParams(new_K);
-          Serial.println(">>> Calibration Successful! <<<");
-          Serial.printf("Std Solution: %.2f uS/cm\n", g_condStdValue);
-          Serial.printf("Measured G:   %.ascribed4f uS\n", measured_G);
-          Serial.printf("New K_Cell:   %.4f cm^-1\n", new_K);
+          // $COND,CAL,<measured_G_uS>,<std_value_uS_cm>,<new_K_cell>*
+          Serial.printf("$COND,CAL,%.4f,%.2f,%.4f*\n", measured_G, g_condStdValue, new_K);
           currentState = STATE_IDLE;
-          }
+        }
       }
     break;
     // === 处理pH服务 ===
@@ -515,76 +510,78 @@ void handleSerialCommand() {
     }    
 
     else if (cmd == "cond read") {
-      if (!g_isCondMode) 
+      if (!g_isCondMode)
       {
-        Serial.println("Not in Conductivity Mode");
+        Serial.println("$ERR,COND,Not in Conductivity Mode*");
         return;
       }
       ChooseSenesingChannel(1);
       Serial.println("[CMD] Triggering Cond_Impedance Measurement...");
       AppCondCtrl(CondCTRL_START, 0);
       currentState = STATE_COND_MEASURE;
-    }    
+    }
 
     else if (cmd == "cond cal") {
-      if (!g_isCondMode) 
+      if (!g_isCondMode)
       {
-        Serial.println("Not in Conductivity Mode");
+        Serial.println("$ERR,COND,Not in Conductivity Mode*");
         return;
       }
       Serial.println("[CMD] Starting K_Cell calibration");
       ChooseSenesingChannel(1);
       AppCondCtrl(CondCTRL_START, 0);
       currentState = STATE_COND_CAL;
-    } 
+    }
 
     else if (cmd == "cond sweep") {
-      if (g_isSweepMode) 
+      if (g_isSweepMode)
       {
-        Serial.println("Already sweeping!");
+        Serial.println("$ERR,COND,Already sweeping*");
         return;
       }
-      if (!g_isCondMode) 
+      if (!g_isCondMode)
       {
-        Serial.println("Not in Conductivity Mode");
+        Serial.println("$ERR,COND,Not in Conductivity Mode*");
         return;
       }
       ChooseSenesingChannel(1);
-      Serial.println("[CMD] Starting Frequency Sweep (1kHz -> 100kHz)...");
+      Serial.println("[CMD] Starting Frequency Sweep...");
       AppCondCfg.SweepCfg.SweepEn = bTRUE;
       AppCondCfg.ReDoRtiaCal = bTRUE;
-      AppCondCfg.bParaChanged = bTRUE;   
-      if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
+      AppCondCfg.bParaChanged = bTRUE;
+      if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK)
       {
           g_isSweepMode = true;
-          g_sweepCount = 0; 
+          g_sweepCount = 0;
           g_sweepTotalPoints = AppCondCfg.SweepCfg.SweepPoints;
+          Serial.printf("$COND,SWEEP_START,%d*\n", g_sweepTotalPoints);
           currentState = STATE_COND_SWEEP;
           AppCondCtrl(CondCTRL_START, 0);
-       } else {
-           Serial.println("Sweep Init Failed!");
-       }
+      } else {
+          Serial.println("$ERR,COND,Sweep init failed*");
+      }
     }
-    
+
     else if (cmd.startsWith("cond freq ")) {
-      if (!g_isCondMode) 
-      { 
-        Serial.println("Not in Conductivity Mode"); return; 
+      if (!g_isCondMode)
+      {
+        Serial.println("$ERR,COND,Not in Conductivity Mode*");
+        return;
       }
       float newFreq = cmd.substring(10).toFloat();
       if (newFreq < 2000.0 || newFreq > 200000.0) {
-          Serial.println("[ERR] Freq out of range (2000~200000 Hz)");
+          Serial.println("$ERR,COND,Freq out of range (2000~200000 Hz)*");
           return;
       }
       AppCondCfg.SinFreq = newFreq;
       AppCondCfg.ReDoRtiaCal = bTRUE;
       AppCondCfg.bParaChanged = bTRUE;
       if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
-          Serial.printf("[COND] Frequency set to %.1f Hz\n", newFreq);
+          Serial.printf("$COND,FREQ_SET,%.2f*\n", newFreq);
       } else {
-          Serial.println("[ERR] Frequency set failed");
+          Serial.println("$ERR,COND,Frequency set failed*");
       }
-   }
+    }
     // === pH值指令 ===
     else if (cmd == "ph init") 
     {
