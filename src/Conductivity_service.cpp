@@ -20,7 +20,7 @@ AD5940Err AppCondCfg_init(){
     AppCondCfg.RcalVal = 1000.0; /* 10k 欧姆 */
 
     AppCondCfg.PwrMod = AFEPWR_LP;
-    AppCondCfg.HstiaRtiaSel = HSTIARTIA_5K;
+    AppCondCfg.HstiaRtiaSel = HSTIARTIA_1K;
     AppCondCfg.CtiaSel = 4;
     AppCondCfg.ExcitBufGain = EXCITBUFGAIN_2;
     AppCondCfg.HsDacGain = HSDACGAIN_1;
@@ -316,6 +316,7 @@ static AD5940Err AppCondSeqMeasureGen(void)
   }
   else
     return error; /* 错误 */
+  Serial.printf("[DEBUG] SeqLen = %d\n", SeqLen);
   return AD5940ERR_OK;
 }
 
@@ -492,7 +493,14 @@ AD5940Err AppCondCheckFreq(float freq)
   uint32_t SRAMAddr = 0;;
   /* 步骤 1：检查频率 */
   freq_params = AD5940_GetFreqParameters(freq);
-
+    Serial.printf("[FREQ_PARAMS] freq=%.0f | HighPwr=%d | DftSrc=%d | DftNum=%d | Sinc3Osr=%d | Sinc2Osr=%d\n",
+    freq,
+    freq_params.HighPwrMode,
+    freq_params.DftSrc,
+    freq_params.DftNum,
+    freq_params.ADCSinc3Osr,
+    freq_params.ADCSinc2Osr
+  );
 	/* 设置电源模式 */
   if(freq_params.HighPwrMode == bTRUE)
   {
@@ -545,6 +553,7 @@ AD5940Err AppCondCheckFreq(float freq)
   clks_cal.ADCAvgNum = 0;
   clks_cal.RatioSys2AdcClk = AppCondCfg.SysClkFreq/AppCondCfg.AdcClkFreq;
   AD5940_ClksCalculate(&clks_cal, &WaitClks);
+  Serial.printf("[WAITCLKS] freq=%.0f WaitClks=%d\n", freq, WaitClks);
 
 	/* 最大时钟数是 0x3FFFFFFF。如果频率很低，则需要更多时钟 */
 	if(WaitClks > 0x3FFFFFFF)

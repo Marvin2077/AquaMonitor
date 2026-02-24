@@ -402,7 +402,7 @@ void loop() {
           savePhParams(measured_offset, AppPHCfg.Rtia_Value_Ohm);
           Serial.printf(">>> Offset Calibrated! New Zero Code: 0x%04X (%d) <<<\n", measured_offset, measured_offset);
           // 校准完成后，自动恢复开关设置到正常模式
-          AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; // 恢复连接传感器
+          AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA; // 恢复连接传感器
           AppPHCfg.bParaChanged = bTRUE;
           AppPHInit(AppBuff, APPBUFF_SIZE); // 重建序列
           currentState = STATE_IDLE;
@@ -585,7 +585,7 @@ void handleSerialCommand() {
     // === pH值指令 ===
     else if (cmd == "ph init") 
     {
-      ChooseSenesingChannel(2);
+      ChooseSenesingChannel(3);
       Serial.println("[CMD] Initializing pH Measurement...");
       currentState = STATE_PH_INIT;
     }
@@ -607,7 +607,7 @@ void handleSerialCommand() {
         Serial.println("Not in pH Mode");
         return;
       }
-      ChooseSenesingChannel(2);
+      ChooseSenesingChannel(3);
       Serial.println("[CMD] Calibrating pH Offset (Disconnecting Input)...");
       // 1. 修改配置：断开所有开关
       AppPHCfg.TswitchSel =  SWT_TRTIA; 
@@ -628,7 +628,7 @@ void handleSerialCommand() {
         Serial.println("Not in pH Mode");
         return;
       }
-      ChooseSenesingChannel(2);
+      ChooseSenesingChannel(3);
         // 1. 解析输入的电阻值
         String valStr = cmd.substring(11); // "ph cal gain" 长度是 11
         valStr.trim();
@@ -643,7 +643,7 @@ void handleSerialCommand() {
                 AppPHCfg.DswitchSel = SWD_OPEN;
                 AppPHCfg.PswitchSel = SWP_PL | SWP_PL2;
                 AppPHCfg.NswitchSel = SWN_OPEN;
-                AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
+                AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA; 
                 // 3. 重新初始化序列以应用开关设置
                 AppPHCfg.bParaChanged = bTRUE;
                 if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
