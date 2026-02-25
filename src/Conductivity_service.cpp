@@ -3,6 +3,10 @@
 
 AppCondCfg_Type AppCondCfg;
 
+// ================= 电导率三点校准全局变量 =================
+CondCalibCoeff g_condCalib;
+CondCalibPoint g_condCalPoints[3];
+
 AD5940Err AppCondCfg_init(){
 
     AppCondCfg.bParaChanged = bFALSE;
@@ -732,7 +736,7 @@ int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sw
         Conductance_S = R / magSq;
     }
     float Conductance_uS = Conductance_S * 1e6f;
-    float Conductivity_uS_cm = Conductance_uS * AppCondCfg.K_Cell;
+    float Conductivity_uS_cm = ApplyCondCalib(Conductance_uS * AppCondCfg.K_Cell);
     float mag   = AD5940_ComplexMag(&pImp[i]);
     float phase = AD5940_ComplexPhase(&pImp[i]) * 180.0f / MATH_PI;
 
@@ -753,4 +757,72 @@ int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sw
     }
   }
   return 0;
+}
+
+// ================= 工具函数：解 3x3 线性方程组 (高斯消元) =================
+static inline bool condSolve3x3(float A[3][3], float y[3], float x[3]) {
+  for (int i = 0; i < 3; ++i) {
+    float pivot = A[i][i];
+    if (fabsf(pivot) < 1e-12f) return false; // 主元过小，无解
+    float inv = 1.0f / pivot;
+    for (int j = i; j < 3; ++j) A[i][j] *= inv;
+    y[i] *= inv;
+    for (int r = 0; r < 3; ++r) if (r != i) {
+      float f = A[r][i];
+      for (int c = i; c < 3; ++c) A[r][c] -= f * A[i][c];
+      y[r] -= f * y[i];
+    }
+  }
+  x[0] = y[0]; x[1] = y[1]; x[2] = y[2];
+  return true;
+}
+
+// ================= 三点校准函数实现 =================
+bool CondFitThreePoint(const CondCalibPoint& p1,
+                       const CondCalibPoint& p2,
+                       const CondCalibPoint& p3,
+                       CondCalibCoeff& coeff)
+{
+  // 防护：如果三点的 cond_meas 差值 < 10.0f，返回 false
+  if (fabsf(p1.cond_meas - p2.cond_meas) < 10.0f ||
+      fabsf(p2.cond_meas - p3.cond_meas) < 10.0f ||
+      fabsf(p1.cond_meas - p3.cond_meas) < 10.0f) {
+    Serial.println("[COND_CAL] Warning: Points too close, cannot fit!");
+    return false;
+  }
+
+  // 我们要解方程组: cond_true = a*cond_meas^2 + b*cond_meas + c
+  // 构建矩阵方程: [g^2  g  1] * [a b c]^T = cond_true
+
+  float A[3][3] = {
+    { p1.cond_meas * p1.cond_meas, p1.cond_meas, 1.0f },
+    { p2.cond_meas * p2.cond_meas, p2.cond_meas, 1.0f },
+    { p3.cond_meas * p3.cond_meas, p3.cond_meas, 1.0f }
+  };
+
+  float Y[3] = { p1.cond_true, p2.cond_true, p3.cond_true };
+  float X[3] = { 0, 0, 0 };
+
+  if (!condSolve3x3(A, Y, X))
+  {
+    Serial.println("[COND_CAL] Matrix solve failed!");
+    return false;
+  }
+
+  coeff.a = X[0];
+  coeff.b = X[1];
+  coeff.c = X[2];
+  coeff.valid = true;
+  return true;
+}
+
+// ================= 应用校准系数 =================
+float ApplyCondCalib(float raw_conductivity)
+{
+  if (!g_condCalib.valid) {
+    return raw_conductivity; // 如果没有校准，直接返回原始值
+  }
+  return g_condCalib.a * raw_conductivity * raw_conductivity
+       + g_condCalib.b * raw_conductivity
+       + g_condCalib.c;
 }

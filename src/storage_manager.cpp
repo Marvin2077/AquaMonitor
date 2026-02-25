@@ -119,21 +119,49 @@ TempCalibData loadTempParams() {
     return data;
 }
 
+// 4. 电导率三点校准
+void saveCondCalib(float a, float b, float c, bool valid) {
+    prefs.begin(NVS_NS, false);
+    prefs.putFloat(KEY_COND_CAL_A, a);
+    prefs.putFloat(KEY_COND_CAL_B, b);
+    prefs.putFloat(KEY_COND_CAL_C, c);
+    prefs.putBool(KEY_COND_CAL_VALID, valid);
+    Serial.println("[Storage] Saved Cond Calib Coeffs.");
+    prefs.end();
+}
+
+CondCalibData loadCondCalib() {
+    prefs.begin(NVS_NS, true);
+    CondCalibData data;
+    data.a = prefs.getFloat(KEY_COND_CAL_A, 0.0f);
+    data.b = prefs.getFloat(KEY_COND_CAL_B, 1.0f);
+    data.c = prefs.getFloat(KEY_COND_CAL_C, 0.0f);
+    data.valid = prefs.getBool(KEY_COND_CAL_VALID, false);
+    prefs.end();
+    return data;
+}
+
 void resetCalibrationParams() {
     prefs.begin(NVS_NS, false); // false = read/write
 
     // 1. 删除电导率参数
     prefs.remove(KEY_COND_K);
-    
+
     // 2. 删除 pH 参数
     prefs.remove(KEY_PH_OFF);
     prefs.remove(KEY_PH_RTIA);
-    
+
     // 3. 删除温度参数
     prefs.remove(KEY_TEMP_A);
     prefs.remove(KEY_TEMP_B);
     prefs.remove(KEY_TEMP_C);
     prefs.remove(KEY_TEMP_VALID);
+
+    // 4. 删除电导率三点校准参数
+    prefs.remove(KEY_COND_CAL_A);
+    prefs.remove(KEY_COND_CAL_B);
+    prefs.remove(KEY_COND_CAL_C);
+    prefs.remove(KEY_COND_CAL_VALID);
 
     Serial.println("[Storage] All calibration params deleted (reset to defaults).");
     prefs.end();

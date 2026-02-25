@@ -15,6 +15,12 @@ static const char* KEY_TEMP_B = "temp_b";      // 温度系数 B
 static const char* KEY_TEMP_C = "temp_c";      // 温度系数 C
 static const char* KEY_TEMP_VALID = "temp_v";  // 温度校准是否有效
 
+// 电导率三点校准参数
+static const char* KEY_COND_CAL_A = "cond_a";      // 电导率校准系数 A
+static const char* KEY_COND_CAL_B = "cond_b";      // 电导率校准系数 B
+static const char* KEY_COND_CAL_C = "cond_c";      // 电导率校准系数 C
+static const char* KEY_COND_CAL_VALID = "cond_v";  // 电导率校准是否有效
+
 void writeDeviceID(int id);
 int readDeviceID();
 void ensureDeviceID();
@@ -39,9 +45,17 @@ struct TempCalibData {
     float a, b, c;
     bool valid;
 };
+
+// 4. 电导率三点校准
+struct CondCalibData {
+    float a, b, c;
+    bool valid;
+};
+
 void saveTempParams(float a, float b, float c, bool valid);
 TempCalibData loadTempParams();
 
-
+void saveCondCalib(float a, float b, float c, bool valid);
+CondCalibData loadCondCalib();
 
 #endif

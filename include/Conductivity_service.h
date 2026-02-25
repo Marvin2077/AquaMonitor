@@ -69,7 +69,34 @@ typedef struct
   BoolFlag StopRequired;          /* FIFO 准备就绪后，停止测量序列 */
   uint32_t FifoDataCount;         /* 计算阻抗已被测量的次数 */
 }AppCondCfg_Type;
-extern AppCondCfg_Type AppCondCfg; 
+extern AppCondCfg_Type AppCondCfg;
+
+// ================= 电导率三点校准相关结构体 =================
+struct CondCalibPoint
+{
+  float cond_true;   // 标准液已知电导率 μS/cm
+  float cond_meas;   // 实测电导率 μS/cm
+  bool  recorded = false;
+};
+
+struct CondCalibCoeff
+{
+  float a = 0.0f;
+  float b = 1.0f;  // 默认线性，斜率为1
+  float c = 0.0f;
+  bool  valid = false;
+};
+
+// 全局变量声明
+extern CondCalibCoeff g_condCalib;
+extern CondCalibPoint g_condCalPoints[3];
+
+// 函数声明
+float ApplyCondCalib(float raw_conductivity);
+bool CondFitThreePoint(const CondCalibPoint& p1,
+                       const CondCalibPoint& p2,
+                       const CondCalibPoint& p3,
+                       CondCalibCoeff& coeff);
 
 #define CondCTRL_START          0
 #define CondCTRL_STOPNOW        1

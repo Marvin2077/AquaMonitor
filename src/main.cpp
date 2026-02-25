@@ -44,6 +44,8 @@ bool g_isSweepMode = false;
 int g_sweepCount = 0;     // 当前已测量的点数
 int g_sweepTotalPoints = 0; // 总共要测的点数
 float g_condStdValue = 1413.0f; // 默认标准液值
+float g_condCalStdValue = 0.0f;  // 三点校准当前点标准液值
+int g_condCalSlot = 0;           // 下一个要记录的校准点槽位(0/1/2)
 bool g_isCalibratingCond = false;
 // ===pH 服务标志位/全局变量 ===
 bool g_ispHMode = false;
@@ -73,6 +75,11 @@ enum SystemState {
   STATE_COND_MEASURE,     // 电导率测量
   STATE_COND_SWEEP,       // 电导率扫频
   STATE_COND_CAL,         // 电导率电极常数校准
+  STATE_COND_CAL_P1,      // 电导率三点校准 点1
+  STATE_COND_CAL_P2,      // 电导率三点校准 点2
+  STATE_COND_CAL_P3,      // 电导率三点校准 点3
+  STATE_COND_SAVE_CAL,    // 电导率三点校准 计算保存
+  STATE_COND_RESET_CAL,   // 电导率三点校准 重置
   STATE_PH_INIT,        // 电导率初始化
   STATE_PH_MEASURE,       // pH 测量
   STATE_PH_CAL_OFFSET,    // pH Offset 校准
@@ -177,6 +184,17 @@ void setup() {
      Serial.println("[Setup] Loaded Temp Calibration.");
   } else {
      Serial.println("[Setup] No valid Temp Calibration found.");
+  }
+  // 4. 读取并应用 电导率三点校准 参数
+  CondCalibData condCalData = loadCondCalib();
+  if (condCalData.valid) {
+    g_condCalib.a = condCalData.a;
+    g_condCalib.b = condCalData.b;
+    g_condCalib.c = condCalData.c;
+    g_condCalib.valid = true;
+    Serial.println("[Setup] Loaded Cond 3-Point Calibration.");
+  } else {
+    Serial.println("[Setup] No valid Cond 3-Point Calibration found.");
   }
   //完成芯片和服务初始化
   Serial.println("System Initialized");
@@ -350,6 +368,74 @@ void loop() {
         }
       }
     break;
+    case STATE_COND_CAL_P1:
+    case STATE_COND_CAL_P2:
+    case STATE_COND_CAL_P3:
+    {
+      static uint8_t sampleCount = 0;
+      static float   accum       = 0.0f;
+      const  uint8_t SAMPLES     = 10;
+      if (AppCondCfg.CondInited == bFALSE || g_isCondMode == false) {
+        Serial.println("$ERR,COND,Not initialized*");
+        sampleCount = 0; accum = 0.0f;
+        currentState = STATE_IDLE;
+        break;
+      }
+      if (AppCondISR(AppBuff, &tempCount) == 0) {
+        if (tempCount > 0) {
+          float rawCond = ComputeKCell(AppBuff, tempCount) * AppCondCfg.K_Cell;
+          accum += rawCond;
+          sampleCount++;
+          if (sampleCount < SAMPLES) {
+            AppCondCtrl(CondCTRL_START, 0);
+          } else {
+            float avgCond = accum / (float)SAMPLES;
+            g_condCalPoints[g_condCalSlot].cond_true = g_condCalStdValue;
+            g_condCalPoints[g_condCalSlot].cond_meas = avgCond;
+            g_condCalPoints[g_condCalSlot].recorded  = true;
+            Serial.printf("$COND,CAL_PT,%d,%.2f,%.4f*\n",
+                          g_condCalSlot, g_condCalStdValue, avgCond);
+            g_condCalSlot++;
+            sampleCount = 0;
+            accum = 0.0f;
+            currentState = STATE_IDLE;
+          }
+        }
+      }
+    }
+    break;
+    case STATE_COND_SAVE_CAL:
+    {
+      if (!g_condCalPoints[0].recorded || !g_condCalPoints[1].recorded || !g_condCalPoints[2].recorded) {
+        int n = (int)g_condCalPoints[0].recorded + (int)g_condCalPoints[1].recorded + (int)g_condCalPoints[2].recorded;
+        Serial.printf("$ERR,COND,Not all 3 points recorded (%d/3)*\n", n);
+        currentState = STATE_IDLE;
+        break;
+      }
+      if (CondFitThreePoint(g_condCalPoints[0], g_condCalPoints[1], g_condCalPoints[2], g_condCalib)) {
+        saveCondCalib(g_condCalib.a, g_condCalib.b, g_condCalib.c, true);
+        Serial.printf("$COND,CAL_SAVE,%.6f,%.6f,%.6f*\n",
+                      g_condCalib.a, g_condCalib.b, g_condCalib.c);
+      } else {
+        Serial.println("$ERR,COND,3-point fit failed*");
+      }
+      currentState = STATE_IDLE;
+    }
+    break;
+    case STATE_COND_RESET_CAL:
+    {
+      g_condCalib = CondCalibCoeff{};
+      saveCondCalib(0.0f, 1.0f, 0.0f, false);
+      for (int i = 0; i < 3; i++) {
+        g_condCalPoints[i].recorded  = false;
+        g_condCalPoints[i].cond_true = 0.0f;
+        g_condCalPoints[i].cond_meas = 0.0f;
+      }
+      g_condCalSlot = 0;
+      Serial.println("$COND,CAL_RESET,OK*");
+      currentState = STATE_IDLE;
+    }
+    break;
     // === 处理pH服务 ===
     case STATE_PH_INIT:
       ChooseSenesingChannel(3);
@@ -521,7 +607,7 @@ void handleSerialCommand() {
       currentState = STATE_COND_MEASURE;
     }
 
-    else if (cmd == "cond cal") {
+    else if (cmd == "cond cal kcell") {
       if (!g_isCondMode)
       {
         Serial.println("$ERR,COND,Not in Conductivity Mode*");
@@ -531,6 +617,41 @@ void handleSerialCommand() {
       ChooseSenesingChannel(1);
       AppCondCtrl(CondCTRL_START, 0);
       currentState = STATE_COND_CAL;
+    }
+
+    else if (cmd.startsWith("cond cal ")) {
+      if (!g_isCondMode) {
+        Serial.println("$ERR,COND,Not in Conductivity Mode*");
+        return;
+      }
+      if (g_condCalSlot > 2) {
+        Serial.println("$ERR,COND,All 3 points recorded. Run 'cond save' or 'cond reset'*");
+        return;
+      }
+      float stdVal = cmd.substring(9).toFloat();
+      if (stdVal <= 0.0f) {
+        Serial.println("$ERR,COND,Invalid standard value*");
+        return;
+      }
+      g_condCalStdValue = stdVal;
+      ChooseSenesingChannel(1);
+      AppCondCtrl(CondCTRL_START, 0);
+      // 根据槽位分派到不同 state
+      if      (g_condCalSlot == 0) currentState = STATE_COND_CAL_P1;
+      else if (g_condCalSlot == 1) currentState = STATE_COND_CAL_P2;
+      else                         currentState = STATE_COND_CAL_P3;
+      Serial.printf("[CMD] Recording cond cal point %d, std=%.2f uS/cm\n",
+                    g_condCalSlot + 1, stdVal);
+    }
+
+    else if (cmd == "cond save") {
+      Serial.println("[CMD] Computing conductivity 3-point calibration...");
+      currentState = STATE_COND_SAVE_CAL;
+    }
+
+    else if (cmd == "cond reset") {
+      Serial.println("[CMD] Resetting conductivity 3-point calibration...");
+      currentState = STATE_COND_RESET_CAL;
     }
 
     else if (cmd == "cond sweep") {
@@ -643,7 +764,7 @@ void handleSerialCommand() {
                 AppPHCfg.DswitchSel = SWD_OPEN;
                 AppPHCfg.PswitchSel = SWP_PL | SWP_PL2;
                 AppPHCfg.NswitchSel = SWN_OPEN;
-                AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA; 
+                AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
                 // 3. 重新初始化序列以应用开关设置
                 AppPHCfg.bParaChanged = bTRUE;
                 if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
