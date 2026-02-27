@@ -53,8 +53,8 @@ AD5940Err AppCondCfg_init(){
 
     AppCondCfg.SweepCfg.SweepEn = bFALSE;
     AppCondCfg.SweepCfg.SweepStart = 1000.0;
-    AppCondCfg.SweepCfg.SweepStop = 200000.0;
-    AppCondCfg.SweepCfg.SweepPoints = 100;
+    AppCondCfg.SweepCfg.SweepStop = 100000.0;
+    AppCondCfg.SweepCfg.SweepPoints = 50;
     AppCondCfg.SweepCfg.SweepLog = bFALSE;
     AppCondCfg.SweepCfg.SweepIndex = 0;
 
