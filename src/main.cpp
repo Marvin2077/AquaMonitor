@@ -320,6 +320,10 @@ void loop() {
     case STATE_COND_SWEEP:
       if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
       {
+        g_isSweepMode = false;
+        g_sweepCount  = 0;
+        AppCondCfg.SweepCfg.SweepEn    = bFALSE;
+        AppCondCfg.SweepCfg.SweepIndex = 0;
         Serial.println("$ERR,COND,Not initialized*");
         currentState = STATE_IDLE;
         break;
@@ -338,6 +342,8 @@ void loop() {
             {
               Serial.println("$COND,SWEEP_END*");
               g_isSweepMode = false;
+              g_sweepCount  = 0;  
+              AppCondCfg.SweepCfg.SweepIndex = 0;
               AppCondCfg.SweepCfg.SweepEn = bFALSE;
               AppCondCfg.bParaChanged = bTRUE;
               AppCondInit(AppBuff, APPBUFF_SIZE);
@@ -360,6 +366,12 @@ void loop() {
         {
           float measured_G = ComputeKCell(AppBuff, tempCount);
           float new_K = g_condStdValue / measured_G;
+          if(measured_G <= 0.0f)                         //防除零保护
+          {
+            Serial.println("$ERR,COND,CAL,Invalid G=0*");
+            currentState = STATE_IDLE;
+            break;
+          }
           AppCondCfg.K_Cell = new_K;
           saveCondParams(new_K);
           // $COND,CAL,<measured_G_uS>,<std_value_uS_cm>,<new_K_cell>*
@@ -383,7 +395,14 @@ void loop() {
       }
       if (AppCondISR(AppBuff, &tempCount) == 0) {
         if (tempCount > 0) {
-          float rawCond = ComputeKCell(AppBuff, tempCount) * AppCondCfg.K_Cell;
+          float raw_G = ComputeKCell(AppBuff, tempCount);
+          if(raw_G <= 0.0f)
+          {
+            Serial.println("$ERR,COND,CAL_P,Invalid G=0, retrying*");
+            AppCondCtrl(CondCTRL_START, 0);  // 重触发，不累加，不计数
+            break;
+          }
+          float rawCond = raw_G * AppCondCfg.K_Cell;
           accum += rawCond;
           sampleCount++;
           if (sampleCount < SAMPLES) {
