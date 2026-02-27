@@ -7,49 +7,54 @@ AppCondCfg_Type AppCondCfg;
 CondCalibCoeff g_condCalib;
 CondCalibPoint g_condCalPoints[3];
 
+/* Default LPDAC resolution(2.5V internal reference). */
+#define DAC12BITVOLT_1LSB   (2200.0f/4095)  //mV
+#define DAC6BITVOLT_1LSB    (DAC12BITVOLT_1LSB*64)  //mV
+
 AD5940Err AppCondCfg_init(){
 
     AppCondCfg.bParaChanged = bFALSE;
     AppCondCfg.SeqStartAddr = 0;
-    AppCondCfg.MaxSeqLen = 512;
+    AppCondCfg.MaxSeqLen = 0;
     AppCondCfg.SeqStartAddrCal = 0;
     AppCondCfg.MaxSeqLenCal = 0;
 
-    AppCondCfg.ReDoRtiaCal = bFALSE;
     AppCondCfg.SysClkFreq = 16000000.0;
     AppCondCfg.WuptClkFreq = 32000.0;
     AppCondCfg.AdcClkFreq = 16000000.0;
     AppCondCfg.CondODR = 20.0; /* 20.0 赫兹 */
     AppCondCfg.NumOfData = -1;
-    AppCondCfg.RcalVal = 1000.0; /* 10k 欧姆 */
+    AppCondCfg.RcalVal = 1000.0; /* 1k 欧姆 */
 
-    AppCondCfg.PwrMod = AFEPWR_LP;
+    AppCondCfg.PwrMod = AFEPWR_HP;
     AppCondCfg.HstiaRtiaSel = HSTIARTIA_1K;
     AppCondCfg.CtiaSel = 4;
     AppCondCfg.ExcitBufGain = EXCITBUFGAIN_2;
     AppCondCfg.HsDacGain = HSDACGAIN_1;
     AppCondCfg.HsDacUpdateRate = 7;
     AppCondCfg.DacVoltPP = 600.0;
+    AppCondCfg.BiasVolt = -0.0f;
 
     AppCondCfg.SinFreq = 10000.0; /* 10000 赫兹 */
 
-    AppCondCfg.ADCPgaGain = ADCPGA_1P5;
+    AppCondCfg.ADCPgaGain = ADCPGA_1;
     AppCondCfg.ADCSinc3Osr = ADCSINC3OSR_2;
     AppCondCfg.ADCSinc2Osr = ADCSINC2OSR_22;
+    AppCondCfg.ADCAvgNum =ADCAVGNUM_16;
 
-    AppCondCfg.DftNum = DFTNUM_8192;
+    AppCondCfg.DftNum = DFTNUM_16384;
     AppCondCfg.DftSrc = DFTSRC_SINC3;
     AppCondCfg.HanWinEn = bTRUE;
 
     AppCondCfg.DswitchSel = SWD_CE0;
     AppCondCfg.PswitchSel = SWP_CE0;
     AppCondCfg.NswitchSel = SWN_AIN0;
-    AppCondCfg.TswitchSel = SWN_AIN0;
+    AppCondCfg.TswitchSel = SWT_AIN0;
 
     AppCondCfg.SweepCfg.SweepEn = bFALSE;
     AppCondCfg.SweepCfg.SweepStart = 1000.0;
-    AppCondCfg.SweepCfg.SweepStop = 50000.0;
-    AppCondCfg.SweepCfg.SweepPoints = 50;
+    AppCondCfg.SweepCfg.SweepStop = 200000.0;
+    AppCondCfg.SweepCfg.SweepPoints = 100;
     AppCondCfg.SweepCfg.SweepLog = bFALSE;
     AppCondCfg.SweepCfg.SweepIndex = 0;
 
@@ -86,7 +91,6 @@ AD5940Err AppCondCtrl(int32_t BcmCtrl, void *pPara)
       if(AD5940_WakeUp(10) > 10)  /* 通过读寄存器唤醒 AFE，最多读取 10 次 */
         return AD5940ERR_WAKEUP;  /* 唤醒失败 */
       /* 立即停止 Wupt */
-      AD5940_WUPTCtrl(bFALSE);
       AD5940_WUPTCtrl(bFALSE);
 #ifdef ADI_DEBUG
       ADI_Print("Cond Stop Now...\n");
@@ -131,6 +135,13 @@ AD5940Err AppCondCtrl(int32_t BcmCtrl, void *pPara)
   }
   return AD5940ERR_OK;
 }
+float AppCondGetCurrFreq(void)
+{
+  if(AppCondCfg.SweepCfg.SweepEn == bTRUE)
+    return AppCondCfg.FreqofData;
+  else
+    return AppCondCfg.SinFreq;
+}
 
 /* 生成初始化序列 */
 static AD5940Err AppCondSeqCfgGen(void)
@@ -138,15 +149,14 @@ static AD5940Err AppCondSeqCfgGen(void)
   AD5940Err error = AD5940ERR_OK;
   uint32_t const *pSeqCmd;
   uint32_t SeqLen;
-
   AFERefCfg_Type aferef_cfg;
-  HSLoopCfg_Type hs_loop;
+  HSLoopCfg_Type HsLoopCfg;
   DSPCfg_Type dsp_cfg;
   float sin_freq;
 
   /* 在此处启动序列发生器 */
   AD5940_SEQGenCtrl(bTRUE);
-
+  AD5940_AFECtrlS(AFECTRL_ALL, bFALSE);  /* Init all to disable state */
   aferef_cfg.HpBandgapEn = bTRUE;
   aferef_cfg.Hp1V1BuffEn = bTRUE;
   aferef_cfg.Hp1V8BuffEn = bTRUE;
@@ -158,33 +168,43 @@ static AD5940Err AppCondSeqCfgGen(void)
   aferef_cfg.Lp1V8BuffEn = bFALSE;
 
   /* LP 基准控制 - 关闭它们以节省功耗*/
-  aferef_cfg.LpBandgapEn = bTRUE;
-  aferef_cfg.LpRefBufEn = bTRUE;
+    /* LP reference control - turn off them to save power*/
+  if(AppCondCfg.BiasVolt != 0.0f)    /* With bias voltage */
+  {
+    aferef_cfg.LpBandgapEn = bTRUE;
+    aferef_cfg.LpRefBufEn = bTRUE;
+  }
+  else
+  {
+    aferef_cfg.LpBandgapEn = bFALSE;
+    aferef_cfg.LpRefBufEn = bFALSE;
+  }
   aferef_cfg.LpRefBoostEn = bFALSE;
-  AD5940_REFCfgS(&aferef_cfg);
-  AD5940_StructInit(&hs_loop,sizeof(hs_loop));
-  hs_loop.HsDacCfg.ExcitBufGain = AppCondCfg.ExcitBufGain;
-  hs_loop.HsDacCfg.HsDacGain = AppCondCfg.HsDacGain;
-  hs_loop.HsDacCfg.HsDacUpdateRate = AppCondCfg.HsDacUpdateRate;
+  AD5940_REFCfgS(&aferef_cfg);	
+  HsLoopCfg.HsDacCfg.ExcitBufGain = AppCondCfg.ExcitBufGain;
+  HsLoopCfg.HsDacCfg.HsDacGain = AppCondCfg.HsDacGain;
+  HsLoopCfg.HsDacCfg.HsDacUpdateRate = AppCondCfg.HsDacUpdateRate;
 
-  hs_loop.HsTiaCfg.DiodeClose = bFALSE;
-  hs_loop.HsTiaCfg.HstiaBias = HSTIABIAS_1P1;
-  hs_loop.HsTiaCfg.HstiaCtia = AppCondCfg.CtiaSel; /* 31pF + 2pF */
-  hs_loop.HsTiaCfg.HstiaDeRload = HSTIADERLOAD_OPEN;
-  hs_loop.HsTiaCfg.HstiaDeRtia = HSTIADERTIA_OPEN;
-  hs_loop.HsTiaCfg.HstiaRtiaSel = AppCondCfg.HstiaRtiaSel;
+  HsLoopCfg.HsTiaCfg.DiodeClose = bFALSE;
+	if(AppCondCfg.BiasVolt != 0.0f)    /* With bias voltage */
+		HsLoopCfg.HsTiaCfg.HstiaBias = HSTIABIAS_VZERO0;
+	else
+		HsLoopCfg.HsTiaCfg.HstiaBias = HSTIABIAS_1P1;
+  HsLoopCfg.HsTiaCfg.HstiaCtia = 31; /* 31pF + 2pF */
+  HsLoopCfg.HsTiaCfg.HstiaDeRload = HSTIADERLOAD_OPEN;
+  HsLoopCfg.HsTiaCfg.HstiaDeRtia = HSTIADERTIA_OPEN;
+  HsLoopCfg.HsTiaCfg.HstiaRtiaSel = AppCondCfg.HstiaRtiaSel;
 
-  hs_loop.SWMatCfg.Dswitch = SWD_OPEN;
-  hs_loop.SWMatCfg.Pswitch = SWP_PL|SWP_PL2;
-  hs_loop.SWMatCfg.Nswitch = SWN_NL|SWN_NL2;
-  hs_loop.SWMatCfg.Tswitch = SWT_AIN1 |SWT_TRTIA;
+  HsLoopCfg.SWMatCfg.Dswitch = AppCondCfg.DswitchSel;
+  HsLoopCfg.SWMatCfg.Pswitch = AppCondCfg.PswitchSel;
+  HsLoopCfg.SWMatCfg.Nswitch = AppCondCfg.NswitchSel;
+  HsLoopCfg.SWMatCfg.Tswitch = SWT_TRTIA|AppCondCfg.TswitchSel;
 
-  hs_loop.WgCfg.WgType = WGTYPE_SIN;
-  hs_loop.WgCfg.GainCalEn = bFALSE;
-  hs_loop.WgCfg.OffsetCalEn = bFALSE;
+  HsLoopCfg.WgCfg.WgType = WGTYPE_SIN;
+  HsLoopCfg.WgCfg.GainCalEn = bTRUE;
+  HsLoopCfg.WgCfg.OffsetCalEn = bTRUE;
   if(AppCondCfg.SweepCfg.SweepEn == bTRUE)
   {
-    AppCondCfg.SweepCfg.SweepIndex = 0;
     AppCondCfg.FreqofData = AppCondCfg.SweepCfg.SweepStart;
     AppCondCfg.SweepCurrFreq = AppCondCfg.SweepCfg.SweepStart;
     AD5940_SweepNext(&AppCondCfg.SweepCfg, &AppCondCfg.SweepNextFreq);
@@ -195,39 +215,59 @@ static AD5940Err AppCondSeqCfgGen(void)
     sin_freq = AppCondCfg.SinFreq;
     AppCondCfg.FreqofData = sin_freq;
   }
-  hs_loop.WgCfg.SinCfg.SinFreqWord = AD5940_WGFreqWordCal(sin_freq, AppCondCfg.SysClkFreq);
-  hs_loop.WgCfg.SinCfg.SinAmplitudeWord = (uint32_t)(AppCondCfg.DacVoltPP/800.0f*2047 + 0.5f);
-  hs_loop.WgCfg.SinCfg.SinOffsetWord = 0;
-  hs_loop.WgCfg.SinCfg.SinPhaseWord = 0;
-  AD5940_HSLoopCfgS(&hs_loop);
-
-  AD5940_StructInit(&dsp_cfg,sizeof(dsp_cfg));
+  HsLoopCfg.WgCfg.SinCfg.SinFreqWord = AD5940_WGFreqWordCal(sin_freq, AppCondCfg.SysClkFreq);
+  HsLoopCfg.WgCfg.SinCfg.SinAmplitudeWord = (uint32_t)(AppCondCfg.DacVoltPP/800.0f*2047 + 0.5f);
+  HsLoopCfg.WgCfg.SinCfg.SinOffsetWord = 0;
+  HsLoopCfg.WgCfg.SinCfg.SinPhaseWord = 0;
+  AD5940_HSLoopCfgS(&HsLoopCfg);
+  if(AppCondCfg.BiasVolt != 0.0f)    /* With bias voltage */
+  {
+    LPDACCfg_Type lpdac_cfg;
+    
+    lpdac_cfg.LpdacSel = LPDAC0;
+    lpdac_cfg.LpDacVbiasMux = LPDACVBIAS_12BIT; /* Use Vbias to tuning BiasVolt. */
+    lpdac_cfg.LpDacVzeroMux = LPDACVZERO_6BIT;  /* Vbias-Vzero = BiasVolt */
+    lpdac_cfg.DacData6Bit = 0x40>>1;            /* Set Vzero to middle scale. */
+    if(AppCondCfg.BiasVolt<-1100.0f) AppCondCfg.BiasVolt = -1100.0f + DAC12BITVOLT_1LSB;
+    if(AppCondCfg.BiasVolt> 1100.0f) AppCondCfg.BiasVolt = 1100.0f - DAC12BITVOLT_1LSB;
+    lpdac_cfg.DacData12Bit = (uint32_t)((AppCondCfg.BiasVolt + 1100.0f)/DAC12BITVOLT_1LSB);
+    lpdac_cfg.DataRst = bFALSE;      /* Do not reset data register */
+    lpdac_cfg.LpDacSW = LPDACSW_VBIAS2LPPA|LPDACSW_VBIAS2PIN|LPDACSW_VZERO2LPTIA|LPDACSW_VZERO2PIN|LPDACSW_VZERO2HSTIA;
+    lpdac_cfg.LpDacRef = LPDACREF_2P5;
+    lpdac_cfg.LpDacSrc = LPDACSRC_MMR;      /* Use MMR data, we use LPDAC to generate bias voltage for LPTIA - the Vzero */
+    lpdac_cfg.PowerEn = bTRUE;              /* Power up LPDAC */
+    AD5940_LPDACCfgS(&lpdac_cfg);
+  }
   dsp_cfg.ADCBaseCfg.ADCMuxN = ADCMUXN_HSTIA_N;
   dsp_cfg.ADCBaseCfg.ADCMuxP = ADCMUXP_HSTIA_P;
   dsp_cfg.ADCBaseCfg.ADCPga = AppCondCfg.ADCPgaGain;
-
+  
   memset(&dsp_cfg.ADCDigCompCfg, 0, sizeof(dsp_cfg.ADCDigCompCfg));
-
-  dsp_cfg.ADCFilterCfg.ADCAvgNum = ADCAVGNUM_16;  /* 此设置无关紧要（该功能未启用） */
-  dsp_cfg.ADCFilterCfg.ADCRate = ADCRATE_800KHZ;	/* 告诉滤波链当前 ADC 时钟速率 */
+  
+  dsp_cfg.ADCFilterCfg.ADCAvgNum = AppCondCfg.ADCAvgNum;
+  dsp_cfg.ADCFilterCfg.ADCRate = ADCRATE_800KHZ;	/* Tell filter block clock rate of ADC*/
   dsp_cfg.ADCFilterCfg.ADCSinc2Osr = AppCondCfg.ADCSinc2Osr;
   dsp_cfg.ADCFilterCfg.ADCSinc3Osr = AppCondCfg.ADCSinc3Osr;
-  dsp_cfg.ADCFilterCfg.BpSinc3 = bFALSE;
   dsp_cfg.ADCFilterCfg.BpNotch = bTRUE;
+  dsp_cfg.ADCFilterCfg.BpSinc3 = bFALSE;
   dsp_cfg.ADCFilterCfg.Sinc2NotchEnable = bTRUE;
   dsp_cfg.DftCfg.DftNum = AppCondCfg.DftNum;
   dsp_cfg.DftCfg.DftSrc = AppCondCfg.DftSrc;
   dsp_cfg.DftCfg.HanWinEn = AppCondCfg.HanWinEn;
-
-  memset(&dsp_cfg.StatCfg, 0, sizeof(dsp_cfg.StatCfg)); /* 不关心统计数据 */
+  
+  memset(&dsp_cfg.StatCfg, 0, sizeof(dsp_cfg.StatCfg));
   AD5940_DSPCfgS(&dsp_cfg);
-
-  /* 启用所有这些。它们在休眠模式下会自动关闭以节省功耗 */
-  AD5940_AFECtrlS(AFECTRL_HPREFPWR|AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
-    AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
-      AFECTRL_SINC2NOTCH, bTRUE);
-  AD5940_SEQGpioCtrlS(0/*AGPIO_Pin6|AGPIO_Pin5|AGPIO_Pin1*/);        //GP6->结束序列, GP5 -> AD8233=关闭, GP1->RLD=关闭 .
-
+    
+  /* Enable all of them. They are automatically turned off during hibernate mode to save power */
+  if(AppCondCfg.BiasVolt == 0.0f)
+    AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
+                AFECTRL_WG|AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
+                AFECTRL_SINC2NOTCH, bTRUE);
+  else
+    AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
+                AFECTRL_WG|AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
+                AFECTRL_SINC2NOTCH|AFECTRL_DCBUFPWR, bTRUE);
+    /* Sequence end. */
   /* 序列结束。 */
   AD5940_SEQGenInsert(SEQ_STOP()); /* 添加一个额外的命令来禁用初始化序列的序列发生器，因为我们只想让它运行一次。 */
 
@@ -263,47 +303,46 @@ static AD5940Err AppCondSeqMeasureGen(void)
   clks_cal.DataCount = 1L<<(AppCondCfg.DftNum+2); /* 2^(DFTNUMBER+2) */
   clks_cal.ADCSinc2Osr = AppCondCfg.ADCSinc2Osr;
   clks_cal.ADCSinc3Osr = AppCondCfg.ADCSinc3Osr;
-  clks_cal.ADCAvgNum = 0;
+  clks_cal.ADCAvgNum = AppCondCfg.ADCAvgNum;
   clks_cal.RatioSys2AdcClk = AppCondCfg.SysClkFreq/AppCondCfg.AdcClkFreq;
   AD5940_ClksCalculate(&clks_cal, &WaitClks);
 
   /* 在此处启动序列发生器 */
   AD5940_SEQGenCtrl(bTRUE);
-  AD5940_SEQGpioCtrlS(AGPIO_Pin1/*|AGPIO_Pin5|AGPIO_Pin1*/);//GP6->结束序列, GP5 -> AD8233=关闭, GP1->RLD=关闭 .
+  AD5940_SEQGpioCtrlS(AGPIO_Pin2); /* Set GPIO1, clear others that under control */
+  AD5940_SEQGenInsert(SEQ_WAIT(16*250));  /* @todo wait 250us? */
+  sw_cfg.Dswitch = SWD_RCAL0;
+  sw_cfg.Pswitch = SWP_RCAL0;
+  sw_cfg.Nswitch = SWN_RCAL1;
+  sw_cfg.Tswitch = SWT_RCAL1|SWT_TRTIA;
+  AD5940_SWMatrixCfgS(&sw_cfg);
+	AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
+                AFECTRL_WG|AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
+                AFECTRL_SINC2NOTCH, bTRUE);
+  AD5940_AFECtrlS(AFECTRL_WG|AFECTRL_ADCPWR, bTRUE);  /* Enable Waveform generator */
+  //delay for signal settling DFT_WAIT
+  AD5940_SEQGenInsert(SEQ_WAIT(16*10));
+  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* Start ADC convert and DFT */
+  AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));
+  //wait for first data ready
+  AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG, bFALSE);  /* Stop ADC convert and DFT */
 
-	/* 配置开关矩阵以连接传感器 */
+  /* Configure matrix for external Rz */
   sw_cfg.Dswitch = AppCondCfg.DswitchSel;
   sw_cfg.Pswitch = AppCondCfg.PswitchSel;
   sw_cfg.Nswitch = AppCondCfg.NswitchSel;
-  sw_cfg.Tswitch = AppCondCfg.TswitchSel|SWT_TRTIA;
+  sw_cfg.Tswitch = SWT_TRTIA|AppCondCfg.TswitchSel;
   AD5940_SWMatrixCfgS(&sw_cfg);
+  AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_WG, bTRUE);  /* Enable Waveform generator */
+  AD5940_SEQGenInsert(SEQ_WAIT(16*10));  //delay for signal settling DFT_WAIT
+  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* Start ADC convert and DFT */
+  AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));  /* wait for first data ready */
+  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR, bFALSE);  /* Stop ADC convert and DFT */
+    AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
+                AFECTRL_WG|AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
+                AFECTRL_SINC2NOTCH, bFALSE);
 
-  AD5940_SEQGenInsert(SEQ_WAIT(16*250));
-  /* 步骤 1：测量电流 */
-  AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_HSTIA_N);
-  AD5940_AFECtrlS(AFECTRL_WG|AFECTRL_ADCPWR, bTRUE);  /* 启用波形发生器, ADC 电源 */
-  AD5940_SEQGenInsert(SEQ_WAIT(16*80));
-  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* 启动 ADC 转换和 DFT */
-  AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));  /* 等待第一个数据就绪 */
-	AD5940_SEQGenInsert(SEQ_WAIT(1));
-  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR, bFALSE);  /* 停止 ADC 转换和 DFT */
-
-  /* 步骤 2：测量电压 */
-  AD5940_ADCMuxCfgS(ADCMUXP_VCE0, ADCMUXN_N_NODE);
-  AD5940_AFECtrlS(AFECTRL_WG|AFECTRL_ADCPWR, bTRUE);  /* 启用波形发生器, ADC 电源 */
-  AD5940_SEQGenInsert(SEQ_WAIT(16*80));
-  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* 启动 ADC 转换和 DFT */
-  AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));  /* 等待第一个数据就绪 */
-	AD5940_SEQGenInsert(SEQ_WAIT(1));
-  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR, bFALSE);  /* 停止 ADC 转换和 DFT */
-
-  sw_cfg.Dswitch = SWD_OPEN;
-  sw_cfg.Pswitch = SWP_PL|SWP_PL2;
-  sw_cfg.Nswitch = SWN_NL|SWN_NL2;
-  sw_cfg.Tswitch = SWT_TRTIA;
-  AD5940_SWMatrixCfgS(&sw_cfg); /* 浮空开关 */
-
-  AD5940_SEQGpioCtrlS(0/*AGPIO_Pin6|AGPIO_Pin5|AGPIO_Pin1*/);        //GP6->结束序列, GP5 -> AD8233=关闭, GP1->RLD=关闭 .
+  AD5940_SEQGpioCtrlS(0);        /* Clr GPIO1 */
   AD5940_EnterSleepS();/* 进入休眠 */
   /* 序列结束。 */
   error = AD5940_SEQGenFetchSeq(&pSeqCmd, &SeqLen);
@@ -324,87 +363,6 @@ static AD5940Err AppCondSeqMeasureGen(void)
   return AD5940ERR_OK;
 }
 
-static AD5940Err AppCondRtiaCal(void)
-{
-  HSRTIACal_Type hsrtia_cal;
-  FreqParams_Type freq_params;
-
-  if(AppCondCfg.SweepCfg.SweepEn == bTRUE)
-  {
-    hsrtia_cal.fFreq = AppCondCfg.SweepCfg.SweepStart;
-    freq_params = AD5940_GetFreqParameters(AppCondCfg.SweepCfg.SweepStart);
-  }
-  else
-  {
-    hsrtia_cal.fFreq = AppCondCfg.SinFreq;
-    freq_params = AD5940_GetFreqParameters(AppCondCfg.SinFreq);
-  }
-
-  if(freq_params.HighPwrMode == bTRUE)
-    hsrtia_cal.AdcClkFreq = 32e6;
-  else
-    hsrtia_cal.AdcClkFreq = 16e6;
-
-  hsrtia_cal.ADCSinc2Osr = freq_params.ADCSinc2Osr;
-  hsrtia_cal.ADCSinc3Osr = freq_params.ADCSinc3Osr;
-  hsrtia_cal.DftCfg.DftNum = freq_params.DftNum;
-  hsrtia_cal.DftCfg.DftSrc = freq_params.DftSrc;
-  hsrtia_cal.bPolarResult = bTRUE; /* 我们在这里需要幅度和相位 */
-  hsrtia_cal.DftCfg.HanWinEn = AppCondCfg.HanWinEn;
-  hsrtia_cal.fRcal= AppCondCfg.RcalVal;
-  hsrtia_cal.HsTiaCfg.DiodeClose = bFALSE;
-  hsrtia_cal.HsTiaCfg.HstiaBias = HSTIABIAS_1P1;
-  hsrtia_cal.HsTiaCfg.HstiaCtia = AppCondCfg.CtiaSel;
-  hsrtia_cal.HsTiaCfg.HstiaDeRload = HSTIADERLOAD_OPEN;
-  hsrtia_cal.HsTiaCfg.HstiaDeRtia = HSTIADERTIA_OPEN;
-  hsrtia_cal.HsTiaCfg.HstiaRtiaSel = AppCondCfg.HstiaRtiaSel;
-  hsrtia_cal.SysClkFreq = AppCondCfg.SysClkFreq;
-
-
-  if(AppCondCfg.SweepCfg.SweepEn == bTRUE)
-  {
-    uint32_t i;
-    AppCondCfg.SweepCfg.SweepIndex = 0;  /* 复位扫频索引 */
-    for(i=0;i<AppCondCfg.SweepCfg.SweepPoints;i++)
-    {
-      AD5940_HSRtiaCal(&hsrtia_cal, &AppCondCfg.RtiaCalTable[i]);
-#ifdef ADI_DEBUG
-      ADI_Print("Freq:%.2f, (%f, %f)Ohm\n", hsrtia_cal.fFreq, AppCondCfg.RtiaCalTable[i].Real, AppCondCfg.RtiaCalTable[i].Image);
-#endif
-      AD5940_SweepNext(&AppCondCfg.SweepCfg, &hsrtia_cal.fFreq);
-      freq_params = AD5940_GetFreqParameters(hsrtia_cal.fFreq);
-
-      if(freq_params.HighPwrMode == bTRUE)
-      {
-        hsrtia_cal.AdcClkFreq = 32e6;
-        /* 将时钟切换到 32MHz 振荡器 */
-        AD5940_HPModeEn(bTRUE);
-      }
-      else
-      {
-        hsrtia_cal.AdcClkFreq = 16e6;
-        /* 将时钟切换为 16MHz 振荡器 */
-	      AD5940_HPModeEn(bFALSE);
-      }
-      hsrtia_cal.ADCSinc2Osr = freq_params.ADCSinc2Osr;
-      hsrtia_cal.ADCSinc3Osr = freq_params.ADCSinc3Osr;
-      hsrtia_cal.DftCfg.DftNum = freq_params.DftNum;
-      hsrtia_cal.DftCfg.DftSrc = freq_params.DftSrc;
-    }
-
-    AppCondCfg.SweepCfg.SweepIndex = 0;  /* 复位扫频索引 */
-    AppCondCfg.RtiaCurrValue = AppCondCfg.RtiaCalTable[0];
-  }
-  else
-  {
-    AD5940_HSRtiaCal(&hsrtia_cal, &AppCondCfg.RtiaCurrValue);
-#ifdef ADI_DEBUG
-    ADI_Print("Freq:%.2f, (%f, %f)Ohm\n", hsrtia_cal.fFreq, AppCondCfg.RtiaCurrValue.Real, AppCondCfg.RtiaCurrValue.Image);
-#endif
-  }
-  return AD5940ERR_OK;
-}
-
 /* 该函数完成应用初始化（参数、序列、FIFO、校准等） */
 AD5940Err AppCondInit(uint32_t *pBuffer, uint32_t BufferSize)
 {
@@ -418,19 +376,12 @@ AD5940Err AppCondInit(uint32_t *pBuffer, uint32_t BufferSize)
   /* 配置序列发生器并停止它 */
   seq_cfg.SeqMemSize = SEQMEMSIZE_2KB;  /* 2kB SRAM 用于序列发生器，其余用于数据 FIFO */
   seq_cfg.SeqBreakEn = bFALSE;
-  seq_cfg.SeqIgnoreEn = bFALSE;
+  seq_cfg.SeqIgnoreEn = bTRUE;
   seq_cfg.SeqCntCRCClr = bTRUE;
   seq_cfg.SeqEnable = bFALSE;
   seq_cfg.SeqWrTimer = 0;
   AD5940_SEQCfg(&seq_cfg);
 
-  /* 执行 RTIA 校准 */
-  if((AppCondCfg.ReDoRtiaCal == bTRUE) || \
-    AppCondCfg.CondInited == bFALSE)  /* 在第一次初始化时执行校准 */
-  {
-    AppCondRtiaCal();
-    AppCondCfg.ReDoRtiaCal = bFALSE;
-  }
   /* 重新配置 FIFO */
   AD5940_FIFOCtrlS(FIFOSRC_DFT, bFALSE);									/* 首先禁用 FIFO */
   fifo_cfg.FIFOEn = bTRUE;
@@ -439,7 +390,6 @@ AD5940Err AppCondInit(uint32_t *pBuffer, uint32_t BufferSize)
   fifo_cfg.FIFOSrc = FIFOSRC_DFT;
   fifo_cfg.FIFOThresh = AppCondCfg.FifoThresh;              /* DFT 结果。一对用于 RCAL，另一对用于 Rz。一个 DFT 结果包含实部和虚部 */
   AD5940_FIFOCfg(&fifo_cfg);
-
   AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
 
   /* 启动序列发生器 */
@@ -475,109 +425,12 @@ AD5940Err AppCondInit(uint32_t *pBuffer, uint32_t BufferSize)
   AppCondCfg.MeasureSeqInfo.WriteSRAM = bFALSE;
   AD5940_SEQInfoCfg(&AppCondCfg.MeasureSeqInfo);
 
-  AppCondCheckFreq(AppCondCfg.FreqofData);
   seq_cfg.SeqEnable = bTRUE;
   AD5940_SEQCfg(&seq_cfg);  /* 启用序列发生器，并等待触发 */
   AD5940_ClrMCUIntFlag();   /* 清除之前生成的中断标志 */
+  AD5940_AFEPwrBW(AppCondCfg.PwrMod, AFEBW_250KHZ);
 
   AppCondCfg.CondInited = bTRUE;  /* Cond 应用程序已初始化。 */
-  return AD5940ERR_OK;
-}
-
-/* 根据正弦波的频率设置最佳滤波器设置 */
-AD5940Err AppCondCheckFreq(float freq)
-{
-  ADCFilterCfg_Type filter_cfg;
-  DFTCfg_Type dft_cfg;
-  HSDACCfg_Type hsdac_cfg;
-  uint32_t WaitClks;
-  ClksCalInfo_Type clks_cal;
-  FreqParams_Type freq_params;
-  uint32_t SeqCmdBuff[2];
-  uint32_t SRAMAddr = 0;;
-  /* 步骤 1：检查频率 */
-  freq_params = AD5940_GetFreqParameters(freq);
-    Serial.printf("[FREQ_PARAMS] freq=%.0f | HighPwr=%d | DftSrc=%d | DftNum=%d | Sinc3Osr=%d | Sinc2Osr=%d\n",
-    freq,
-    freq_params.HighPwrMode,
-    freq_params.DftSrc,
-    freq_params.DftNum,
-    freq_params.ADCSinc3Osr,
-    freq_params.ADCSinc2Osr
-  );
-	/* 设置电源模式 */
-  if(freq_params.HighPwrMode == bTRUE)
-  {
-    /* 更新 HSDAC 更新速率 */
-    hsdac_cfg.ExcitBufGain = AppCondCfg.ExcitBufGain;
-    hsdac_cfg.HsDacGain = AppCondCfg.HsDacGain;
-    hsdac_cfg.HsDacUpdateRate = 0x7;
-    AD5940_HSDacCfgS(&hsdac_cfg);
-
-    /*更新 ADC 速率 */
-    filter_cfg.ADCRate = ADCRATE_1P6MHZ;
-    AppCondCfg.AdcClkFreq = 32e6;
-
-    /* 将时钟切换到 32MHz 振荡器 */
-    AD5940_HPModeEn(bTRUE);
-  }else
-	{
-    /* 更新 HSDAC 更新速率 */
-    hsdac_cfg.ExcitBufGain = AppCondCfg.ExcitBufGain;
-    hsdac_cfg.HsDacGain = AppCondCfg.HsDacGain;
-    hsdac_cfg.HsDacUpdateRate = 0x1B;
-    AD5940_HSDacCfgS(&hsdac_cfg);
-    /* 更新 ADC 速率 */
-    filter_cfg.ADCRate = ADCRATE_800KHZ;
-    AppCondCfg.AdcClkFreq = 16e6;
-
-		/* 将时钟切换为 16MHz 振荡器 */
-    AD5940_HPModeEn(bFALSE);
-  }
-
-  /* 步骤 2：调整 ADCFILTERCON 和 DFTCON 以设置最佳的 SINC3、SINC2 和 DFTNUM 设置 */
-  filter_cfg.ADCAvgNum = ADCAVGNUM_16;  /* 不关心，因为它被禁用了 */
-  filter_cfg.ADCSinc2Osr = freq_params.ADCSinc2Osr;
-  filter_cfg.ADCSinc3Osr = freq_params.ADCSinc3Osr;
-  filter_cfg.BpSinc3 = bFALSE;
-  filter_cfg.BpNotch = bTRUE;
-  filter_cfg.Sinc2NotchEnable = bTRUE;
-  dft_cfg.DftNum = freq_params.DftNum;
-  dft_cfg.DftSrc = freq_params.DftSrc;
-  dft_cfg.HanWinEn = AppCondCfg.HanWinEn;
-  AD5940_ADCFilterCfgS(&filter_cfg);
-  AD5940_DFTCfgS(&dft_cfg);
-
-  /* 步骤 3：计算获取结果到 FIFO 所需的时钟，并更新序列发生器等待命令 */
-  clks_cal.DataType = DATATYPE_DFT;
-  clks_cal.DftSrc = freq_params.DftSrc;
-  clks_cal.DataCount = 1L<<(freq_params.DftNum+2); /* 2^(DFTNUMBER+2) */
-  clks_cal.ADCSinc2Osr = freq_params.ADCSinc2Osr;
-  clks_cal.ADCSinc3Osr = freq_params.ADCSinc3Osr;
-  clks_cal.ADCAvgNum = 0;
-  clks_cal.RatioSys2AdcClk = AppCondCfg.SysClkFreq/AppCondCfg.AdcClkFreq;
-  AD5940_ClksCalculate(&clks_cal, &WaitClks);
-  Serial.printf("[WAITCLKS] freq=%.0f WaitClks=%d\n", freq, WaitClks);
-
-	/* 最大时钟数是 0x3FFFFFFF。如果频率很低，则需要更多时钟 */
-	if(WaitClks > 0x3FFFFFFF)
-	{
-		WaitClks /=2;
-		SRAMAddr = AppCondCfg.MeasureSeqInfo.SeqRamAddr;
-		SeqCmdBuff[0] = SEQ_WAIT(WaitClks);
-		AD5940_SEQCmdWrite(SRAMAddr+11, SeqCmdBuff, 1);
-		AD5940_SEQCmdWrite(SRAMAddr+12, SeqCmdBuff, 1);
-		AD5940_SEQCmdWrite(SRAMAddr+18, SeqCmdBuff, 1);
-		AD5940_SEQCmdWrite(SRAMAddr+19, SeqCmdBuff, 1);
-	}
-	else
-	{
-		SRAMAddr = AppCondCfg.MeasureSeqInfo.SeqRamAddr;
-		SeqCmdBuff[0] = SEQ_WAIT(WaitClks);
-		AD5940_SEQCmdWrite(SRAMAddr+11, SeqCmdBuff, 1);
-		AD5940_SEQCmdWrite(SRAMAddr+18, SeqCmdBuff, 1);
-	}
-
   return AD5940ERR_OK;
 }
 
@@ -600,7 +453,6 @@ static AD5940Err AppCondRegModify(int32_t * const pData, uint32_t *pDataCount)
   }
   if(AppCondCfg.SweepCfg.SweepEn) /* 需要设置新频率并设置电源模式 */
   {
-    AppCondCheckFreq(AppCondCfg.SweepNextFreq);
     AD5940_WGFreqCtrlS(AppCondCfg.SweepNextFreq, AppCondCfg.SysClkFreq);
   }
   return AD5940ERR_OK;
@@ -612,7 +464,7 @@ static AD5940Err AppCondDataProcess(int32_t * const pData, uint32_t *pDataCount)
   uint32_t DataCount = *pDataCount;
   uint32_t ImpResCount = DataCount/4;
 
-  fImpCar_Type * pOut = (fImpCar_Type*)pData;
+  fImpCar_Type * const pOut = (fImpCar_Type*)pData;
   iImpCar_Type * pSrcData = (iImpCar_Type*)pData;
 
   *pDataCount = 0;
@@ -630,21 +482,31 @@ static AD5940Err AppCondDataProcess(int32_t * const pData, uint32_t *pDataCount)
   }
   for(uint32_t i=0; i<ImpResCount; i++)
   {
-    fImpCar_Type DftCurr, DftVolt;
-    fImpCar_Type res;
+    iImpCar_Type *pDftRcal, *pDftRz;
+    float RzMag, RzPhase;
+    float RcalMag, RcalPhase;
 
-    DftCurr.Real = (float)pSrcData[i].Real;
-    DftCurr.Image = (float)pSrcData[i].Image;
-    DftVolt.Real = (float)pSrcData[i+1].Real;
-    DftVolt.Image = (float)pSrcData[i+1].Image;
+    // 提取 RCAL 和 Rz 的 DFT 数据
+    pDftRcal = pSrcData++;
+    pDftRz   = pSrcData++;
+    
+    // 计算 RCAL 和 Rz 的模值 (Magnitude)
+    RcalMag = sqrt((float)pDftRcal->Real * pDftRcal->Real + (float)pDftRcal->Image * pDftRcal->Image);
+    RzMag   = sqrt((float)pDftRz->Real * pDftRz->Real + (float)pDftRz->Image * pDftRz->Image);
+    
+    // 计算 RCAL 和 Rz 的相位 (Phase)
+    RcalPhase = atan2(-pDftRcal->Image, pDftRcal->Real);
+    RzPhase   = atan2(-pDftRz->Image, pDftRz->Real);
 
-    DftCurr.Real = -DftCurr.Real;
-    DftCurr.Image = -DftCurr.Image;
-    DftVolt.Real = DftVolt.Real;
-    DftVolt.Image = DftVolt.Image;
-    res = AD5940_ComplexDivFloat(&DftCurr, &AppCondCfg.RtiaCurrValue);           /* I=Vrtia/Zrtia */
-    res = AD5940_ComplexDivFloat(&DftVolt, &res);
-    pOut[i] = res;
+    // 比例法计算目标阻抗真正的幅值与相位 (抵消系统误差)
+    RzMag   = RcalMag / RzMag * AppCondCfg.RcalVal;
+    RzPhase = RcalPhase - RzPhase;
+
+    // --- 关键兼容层 ---
+    // 将极坐标 (RzMag, RzPhase) 转换回直角坐标 (Real, Image)，以兼容现有上层状态机调用
+    pOut[i].Real  = RzMag * cos(RzPhase);
+    pOut[i].Image = RzMag * sin(RzPhase);
+
   }
   *pDataCount = ImpResCount;
   /* 计算下一个频率点 */
@@ -652,35 +514,33 @@ static AD5940Err AppCondDataProcess(int32_t * const pData, uint32_t *pDataCount)
   {
     AppCondCfg.FreqofData = AppCondCfg.SweepCurrFreq;
     AppCondCfg.SweepCurrFreq = AppCondCfg.SweepNextFreq;
-    AppCondCfg.RtiaCurrValue = AppCondCfg.RtiaCalTable[AppCondCfg.SweepCfg.SweepIndex];
     AD5940_SweepNext(&AppCondCfg.SweepCfg, &AppCondCfg.SweepNextFreq);
   }
   return AD5940ERR_OK;
 }
 
-/**
 
-*/
 AD5940Err AppCondISR(void *pBuff, uint32_t *pCount)
 {
   uint32_t BuffCount;
   uint32_t FifoCnt;
+  BuffCount = *pCount;
+  *pCount = 0;
   if(AppCondCfg.CondInited == bFALSE)
     return AD5940ERR_APPERROR;
   if(AD5940_WakeUp(10) > 10)  /* 通过读寄存器唤醒 AFE，最多读取 10 次 */
     return AD5940ERR_WAKEUP;  /* 唤醒失败 */
 
   AD5940_SleepKeyCtrlS(SLPKEY_LOCK);  /* 不要进入休眠 */
-  *pCount = 0;
 
   if(AD5940_INTCTestFlag(AFEINTC_0, AFEINTSRC_DATAFIFOTHRESH) == bTRUE)
   {
     /* 现在 FIFO 中应该有 4 个数据 */
     FifoCnt = (AD5940_FIFOGetCnt()/4)*4;
+
     AD5940_FIFORd((uint32_t *)pBuff, FifoCnt);
     AD5940_INTCClrFlag(AFEINTSRC_DATAFIFOTHRESH);
     AppCondRegModify(static_cast<int32_t*>(pBuff), &FifoCnt);   /* 如果需要重新配置 AFE，请在 AFE 处于活动状态时在此处执行 */
-    AD5940_EnterSleepS();  /* 手动让 AFE 返回休眠以节省功耗 */
     AD5940_SleepKeyCtrlS(SLPKEY_UNLOCK);  /* 允许 AFE 进入休眠模式 */
     /* 进行数据处理 */
     AppCondDataProcess((int32_t*)pBuff,&FifoCnt);
@@ -695,7 +555,7 @@ float ComputeKCell(uint32_t *pData, uint32_t DataCount)
   float freq;
   fImpCar_Type *pImp = (fImpCar_Type*)pData;
   AppCondCtrl(CondCTRL_GETFREQ, &freq);
-for(int i=0; i<DataCount; i++)
+  for(int i=0; i<DataCount; i++)
   {
     float R = pImp[i].Real;   // 阻抗实部 (Resistance)
     float X = pImp[i].Image;  // 阻抗虚部 (Reactance)
@@ -716,13 +576,12 @@ for(int i=0; i<DataCount; i++)
     float Conductance_uS = Conductance_S * 1e6f;
     return Conductance_uS;
   }
-
+  return 0.0f;
 }
 /* 修改后的显示函数，增加电导计算，支持单次测量和扫频两种输出格式 */
 int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sweepIndex, int sweepTotal)
 {
   float freq;
-
   fImpCar_Type *pImp = (fImpCar_Type*)pData;
   AppCondCtrl(CondCTRL_GETFREQ, &freq);
   for(int i=0; i<DataCount; i++)

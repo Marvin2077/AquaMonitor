@@ -23,7 +23,6 @@ typedef struct
   uint32_t MaxSeqLenCal;
 /* 应用相关参数 */
   //BoolFlag bBioElecBoard;     /* 代码对于 BioElec 板和 AD5941Sens1 板是相同的。无需更改 */
-  BoolFlag ReDoRtiaCal;         /* 当需要进行校准时，将此标志设置为 bTRUE。 */
   float SysClkFreq;             /* 系统时钟的实际频率 */
   float WuptClkFreq;            /* 唤醒定时器的时钟频率（单位：Hz）。通常为 32kHz。保留在此，以备我们在软件方法中校准时钟 */
   float AdcClkFreq;             /* ADC 时钟的实际频率 */
@@ -39,6 +38,7 @@ typedef struct
   uint32_t ExcitBufGain;        /* 从 EXCITBUFGAIN_2, EXCITBUFGAIN_0P25 中选择 */
   uint32_t HsDacGain;           /* 从 HSDACGAIN_1, HSDACGAIN_0P2 中选择 */
   uint32_t HsDacUpdateRate;     /* DAC 更新速率为 SystemCLoock/Divider。可用值为 7 到 255。设置为 7 以获得更好性能 */
+  uint8_t ADCAvgNum;
   uint32_t ADCPgaGain;          /* PGA 增益从 GNPGA_1, GNPGA_1_5, GNPGA_2, GNPGA_4, GNPGA_9 中选择 !!! 我们必须确保信号在 ADC 输入级限制的 +/-1.5V 范围内 */
   uint8_t ADCSinc3Osr;          /* SINC3 OSR 选择。ADCSINC3OSR_2, ADCSINC3OSR_4 */
   uint8_t ADCSinc2Osr;          /* SINC2 OSR 选择。ADCSINC2OSR_22...ADCSINC2OSR_1333 */
@@ -58,10 +58,9 @@ typedef struct
   /* 扫频功能控制 */
   SoftSweepCfg_Type SweepCfg;
 /* 供内部使用的私有变量 */
+  float BiasVolt;
   float SweepCurrFreq;
   float SweepNextFreq;
-  fImpCar_Type RtiaCurrValue;                   /* 当前频率下校准的 Rtia 值 */
-  fImpCar_Type RtiaCalTable[MAXSWEEP_POINTS];   /* 校准的 Rtia 值表 */
   float FreqofData;                             /* 最新采样数据的频率 */
   BoolFlag CondInited;                          /* 如果程序首次运行，则生成序列命令 */
   SEQInfo_Type InitSeqInfo;
@@ -108,7 +107,8 @@ AD5940Err AppCondGetCfg(void *pCfg);
 AD5940Err AppCondInit(uint32_t *pBuffer, uint32_t BufferSize);
 AD5940Err AppCondISR(void *pBuff, uint32_t *pCount);
 AD5940Err AppCondCtrl(int32_t BcmCtrl, void *pPara);
-AD5940Err AppCondCheckFreq(float freq);
+//AD5940Err AppCondCheckFreq(float freq);
+float AppCondGetCurrFreq(void);
 AD5940Err AppCondCfg_init(void);
 int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sweepIndex, int sweepTotal);
 float ComputeKCell(uint32_t *pData, uint32_t DataCount);

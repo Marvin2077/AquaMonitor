@@ -126,7 +126,7 @@ void setup() {
 
   // --- 初始化 ADS124S08 --- //
   Serial.println("======================================");
-  Serial.println(" ADS124S08 Setup Start AAAA");
+  Serial.println(" ADS124S08 Setup Start");
   Serial.println("======================================");
    // 1)  初始化 ADS124S08 SPI 总线
   static SpiDevice ads_spidev(CS_ADS124S08, 4000000, MSBFIRST, SPI_MODE1);
@@ -668,7 +668,6 @@ void handleSerialCommand() {
       ChooseSenesingChannel(1);
       Serial.println("[CMD] Starting Frequency Sweep...");
       AppCondCfg.SweepCfg.SweepEn = bTRUE;
-      AppCondCfg.ReDoRtiaCal = bTRUE;
       AppCondCfg.bParaChanged = bTRUE;
       if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK)
       {
@@ -695,7 +694,6 @@ void handleSerialCommand() {
           return;
       }
       AppCondCfg.SinFreq = newFreq;
-      AppCondCfg.ReDoRtiaCal = bTRUE;
       AppCondCfg.bParaChanged = bTRUE;
       if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
           Serial.printf("$COND,FREQ_SET,%.2f*\n", newFreq);
@@ -789,7 +787,9 @@ void handleSerialCommand() {
       // 2. 立即恢复 RAM 中的变量为默认值 (热重载)
       // --- 电导率默认值 ---
       AppCondCfg.K_Cell = 1.0f; 
-      Serial.println("   Cond K_Cell -> 1.0");
+      AppCondCfg.BiasVolt = 0.0f;              // 补充：强制恢复零直流偏置
+      AppCondCfg.ADCAvgNum = ADCAVGNUM_16;     // 补充：恢复默认滤波参数
+      Serial.println("   Cond K_Cell -> 1.0, BiasVolt -> 0.0V");
 
       // --- pH 默认值 ---
       AppPHCfg.ZeroOffset_Code = 32768; // ADC半量程
