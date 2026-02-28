@@ -216,17 +216,17 @@ void loop() {
       break;
     case STATE_TEMP_MEASURE:
       g_tempSvc->measure(currentTemp);
-      Serial.printf(" Water Temp: %3f \n", currentTemp);
+      Serial.printf("$TEMP,MEAS,%.3f*\n", currentTemp);
       currentState = STATE_IDLE;
       break;
     case STATE_TEMP_CAL_P1:
       if (g_tempSvc->recordCalibPoint(0, 25.0)) 
       {
-         Serial.println("Point 1 Saved!");
+         Serial.println("$TEMP,CAL_PT,1,25.0,OK*");
          currentState = STATE_IDLE;     
       } else 
       {
-         Serial.println("Point 1 Failed!");
+         Serial.println("$ERR,TEMP,Point 1 Failed*");
          currentState = STATE_IDLE;     
       }
       currentState = STATE_IDLE;
@@ -234,7 +234,7 @@ void loop() {
     case STATE_TEMP_CAL_P2:
       if (g_tempSvc->recordCalibPoint(1, 35.0)) 
       {
-         Serial.println("Point 2 Saved!");
+         Serial.println("$TEMP,CAL_PT,2,35.0,OK*");
          currentState = STATE_IDLE;
       } else 
       {
@@ -276,7 +276,7 @@ void loop() {
     {
       double r_ohm = 0.0;
       if (g_tempSvc->readResistance(r_ohm)) {
-        Serial.printf("Resistance: %.2f Ohm\n", r_ohm);
+        Serial.printf("$TEMP,RES,%.2f*\n", r_ohm);
       } else {
         Serial.println("[ERR] Resistance read failed");
       }
@@ -626,6 +626,15 @@ void handleSerialCommand() {
       currentState = STATE_COND_MEASURE;
     }
 
+    else if (cmd.startsWith("cond std ")) {
+      float stdVal = cmd.substring(9).toFloat();
+      if (stdVal <= 0.0f) {
+        Serial.println("$ERR,COND,Invalid standard value*");
+        return;
+      }
+      g_condStdValue = stdVal;
+      Serial.printf("$COND,STD_SET,%.2f*\n", stdVal);
+    }
     else if (cmd == "cond cal kcell") {
       if (!g_isCondMode)
       {

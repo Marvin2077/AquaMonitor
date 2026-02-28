@@ -309,13 +309,12 @@ static AD5940Err AppCondSeqMeasureGen(void)
 
   /* 在此处启动序列发生器 */
   AD5940_SEQGenCtrl(bTRUE);
-  AD5940_SEQGpioCtrlS(AGPIO_Pin2); /* Set GPIO1, clear others that under control */
   AD5940_SEQGenInsert(SEQ_WAIT(16*250));  /* @todo wait 250us? */
   sw_cfg.Dswitch = SWD_RCAL0;
   sw_cfg.Pswitch = SWP_RCAL0;
   sw_cfg.Nswitch = SWN_RCAL1;
-  sw_cfg.Tswitch = SWT_RCAL1|SWT_TRTIA;
-  AD5940_SWMatrixCfgS(&sw_cfg);
+  sw_cfg.Tswitch = SWT_RCAL1|SWT_TRTIA; 
+  AD5940_SWMatrixCfgS(&sw_cfg);  //调整开关矩阵
 	AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
                 AFECTRL_WG|AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
                 AFECTRL_SINC2NOTCH, bTRUE);
@@ -325,7 +324,7 @@ static AD5940Err AppCondSeqMeasureGen(void)
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* Start ADC convert and DFT */
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));
   //wait for first data ready
-  AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG, bFALSE);  /* Stop ADC convert and DFT */
+  AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_ADCCNV|AFECTRL_DFT, bFALSE);  /* Stop ADC convert and DFT */
 
   /* Configure matrix for external Rz */
   sw_cfg.Dswitch = AppCondCfg.DswitchSel;
@@ -337,9 +336,9 @@ static AD5940Err AppCondSeqMeasureGen(void)
   AD5940_SEQGenInsert(SEQ_WAIT(16*10));  //delay for signal settling DFT_WAIT
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* Start ADC convert and DFT */
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));  /* wait for first data ready */
-  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR, bFALSE);  /* Stop ADC convert and DFT */
-    AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
-                AFECTRL_WG|AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
+  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_ADCPWR, bFALSE);  /* Stop ADC convert and DFT */
+  AD5940_AFECtrlS(AFECTRL_HSTIAPWR|AFECTRL_INAMPPWR|AFECTRL_EXTBUFPWR|\
+                AFECTRL_DACREFPWR|AFECTRL_HSDACPWR|\
                 AFECTRL_SINC2NOTCH, bFALSE);
 
   AD5940_SEQGpioCtrlS(0);        /* Clr GPIO1 */
