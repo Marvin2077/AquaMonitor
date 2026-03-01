@@ -353,33 +353,62 @@ void loop() {
       }
     break;
     case STATE_COND_CAL:
-      if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
+  if(AppCondCfg.CondInited == bFALSE || g_isCondMode == false)
+  {
+    Serial.println("$ERR,COND,Not initialized*");
+    currentState = STATE_IDLE;
+    break;
+  }
+
+  if(AppCondISR(AppBuff, &tempCount) == 0)
+  {
+    if(tempCount > 0)
+    {
+      static uint8_t calSampleCount = 0;
+      static float   calAccumG      = 0.0f;
+      static float   calAccumT      = 0.0f;
+      const  uint8_t CAL_SAMPLES    = 6;
+
+      float measured_G = ComputeKCell(AppBuff, tempCount);
+      if(measured_G <= 0.0f)
       {
-        Serial.println("$ERR,COND,Not initialized*");
+        Serial.println("$ERR,COND,CAL,Invalid G=0*");
+        calSampleCount = 0; calAccumG = 0.0f; calAccumT = 0.0f;
         currentState = STATE_IDLE;
         break;
       }
 
-      if(AppCondISR(AppBuff, &tempCount) == 0)
+      g_tempSvc->measure(currentTemp);
+      calAccumG += measured_G;
+      calAccumT += currentTemp;
+      calSampleCount++;
+
+      Serial.printf("$COND,CAL,SAMPLE,%d/%d,G=%.4f,T=%.2f*\n",
+                    calSampleCount, CAL_SAMPLES, measured_G, currentTemp);
+
+      if(calSampleCount < CAL_SAMPLES)
       {
-        if(tempCount > 0)
-        {
-          float measured_G = ComputeKCell(AppBuff, tempCount);
-          float new_K = g_condStdValue / measured_G;
-          if(measured_G <= 0.0f)                         //防除零保护
-          {
-            Serial.println("$ERR,COND,CAL,Invalid G=0*");
-            currentState = STATE_IDLE;
-            break;
-          }
-          AppCondCfg.K_Cell = new_K;
-          saveCondParams(new_K);
-          // $COND,CAL,<measured_G_uS>,<std_value_uS_cm>,<new_K_cell>*
-          Serial.printf("$COND,CAL,%.4f,%.2f,%.4f*\n", measured_G, g_condStdValue, new_K);
-          currentState = STATE_IDLE;
-        }
+        AppCondCtrl(CondCTRL_START, 0);  // 继续触发下一次测量
       }
-    break;
+      else
+      {
+        float avg_G = calAccumG / (float)CAL_SAMPLES;
+        float avg_T = calAccumT / (float)CAL_SAMPLES;
+        float ec_true = ApecaStd1413_TrueEC(avg_T);
+        float new_K   = ec_true / avg_G;
+
+        AppCondCfg.K_Cell = new_K;
+        saveCondParams(new_K);
+        // $COND,CAL,DONE,<avg_G>,<ec_true>,<avg_T>,<new_K>*
+        Serial.printf("$COND,CAL,DONE,%.4f,%.2f,%.2f,%.4f*\n",
+                      avg_G, ec_true, avg_T, new_K);
+
+        calSampleCount = 0; calAccumG = 0.0f; calAccumT = 0.0f;
+        currentState = STATE_IDLE;
+      }
+    }
+  }
+break;
     case STATE_COND_CAL_P1:
     case STATE_COND_CAL_P2:
     case STATE_COND_CAL_P3:
@@ -569,6 +598,10 @@ void handleSerialCommand() {
     // === 指令: "temp read" -> 读取一次温度值 ===
     if(cmd == "temp read")
     {
+    if (currentState != STATE_IDLE) {        // ← 加这一行
+        Serial.println("$ERR,BUSY*");
+        return;
+    }
       Serial.println("[CMD] Measuring Temperature");
       currentState = STATE_TEMP_MEASURE;
     }

@@ -112,4 +112,6 @@ float AppCondGetCurrFreq(void);
 AD5940Err AppCondCfg_init(void);
 int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sweepIndex, int sweepTotal);
 float ComputeKCell(uint32_t *pData, uint32_t DataCount);
+// 1413 µS/cm KCl标液的温度-电导率多项式（°C → µS/cm）
+float ApecaStd1413_TrueEC(float temp_C);
 #endif

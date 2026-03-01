@@ -320,7 +320,7 @@ static AD5940Err AppCondSeqMeasureGen(void)
                 AFECTRL_SINC2NOTCH, bTRUE);
   AD5940_AFECtrlS(AFECTRL_WG|AFECTRL_ADCPWR, bTRUE);  /* Enable Waveform generator */
   //delay for signal settling DFT_WAIT
-  AD5940_SEQGenInsert(SEQ_WAIT(16*10));
+  AD5940_SEQGenInsert(SEQ_WAIT(16*800));
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* Start ADC convert and DFT */
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));
   //wait for first data ready
@@ -333,7 +333,7 @@ static AD5940Err AppCondSeqMeasureGen(void)
   sw_cfg.Tswitch = SWT_TRTIA|AppCondCfg.TswitchSel;
   AD5940_SWMatrixCfgS(&sw_cfg);
   AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_WG, bTRUE);  /* Enable Waveform generator */
-  AD5940_SEQGenInsert(SEQ_WAIT(16*10));  //delay for signal settling DFT_WAIT
+  AD5940_SEQGenInsert(SEQ_WAIT(16*800));  //delay for signal settling DFT_WAIT
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);  /* Start ADC convert and DFT */
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks));  /* wait for first data ready */
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_ADCPWR, bFALSE);  /* Stop ADC convert and DFT */
@@ -683,4 +683,18 @@ float ApplyCondCalib(float raw_conductivity)
   return g_condCalib.a * raw_conductivity * raw_conductivity
        + g_condCalib.b * raw_conductivity
        + g_condCalib.c;
+}
+
+/**
+ * @brief  根据当前温度，返回 Apera 1413 µS/cm 标液的真实电导率
+ * @param  temp_C  PT1000测量温度 (°C)
+ * @return 真实电导率 (µS/cm)
+ * @note   拟合公式 y = 0.1002*T^2 + 22.735*T + 781.69，
+ *         有效范围约 5~40°C
+ */
+float ApecaStd1413_TrueEC(float temp_C)
+{
+    return 0.1002f * temp_C * temp_C
+         + 22.735f * temp_C
+         + 781.69f;
 }
