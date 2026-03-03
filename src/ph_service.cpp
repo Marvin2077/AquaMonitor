@@ -1,4 +1,4 @@
-#include "ph_service.h"
+﻿#include "ph_service.h"
 #include "Arduino.h"
 
 AppPHCfg_Type AppPHCfg;
@@ -19,7 +19,7 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.DacData6Bit = 0x17;
     if (AppPHCfg.DacData12Bit > (AppPHCfg.DacData6Bit * 64)) 
     {
-    // 如果 VBIAS 更大，手动减去 1 个 LSB 进行补偿
+    // 如果 VBIAS 更大，手动减去 1 LSB 进行补偿
     AppPHCfg.DacData12Bit = AppPHCfg.DacData12Bit - 1; 
     }
     AppPHCfg.AdcClkFreq = 32000000.0;
@@ -98,8 +98,8 @@ AD5940Err AppPHCtrl(int32_t BcmCtrl, void *pPara)
       }
     case PHCTRL_SHUTDOWN:
       {
-      AppPHCtrl(PHCTRL_STOPNOW, 0);  /* 如果测量正在运行，则停止它。 */
-      /* 关闭那些不受休眠操作自动控制的 LPloop 相关模块 */
+      AppPHCtrl(PHCTRL_STOPNOW, 0);  /* 如果测量正在运行，则停止它。*/
+      /* 关闭那些不受休眠自动控制的 LP loop 相关模块 */
       AFERefCfg_Type aferef_cfg;
       LPLoopCfg_Type lp_loop;
       memset(&aferef_cfg, 0, sizeof(aferef_cfg));
@@ -136,7 +136,7 @@ AD5940Err AppPHSeqCfgGen(void)
   aferef_cfg.Hp1V8Ilimit = bFALSE;
   aferef_cfg.Lp1V1BuffEn = bFALSE;
   aferef_cfg.Lp1V8BuffEn = bFALSE;
-  /* LP 基准控制 - 关闭它们以节省功耗*/
+  // LP reference controls: keep enabled here for this pH sequence.
   aferef_cfg.LpBandgapEn = bTRUE;
   aferef_cfg.LpRefBufEn = bTRUE;
   aferef_cfg.LpRefBoostEn = bFALSE;
@@ -173,7 +173,7 @@ AD5940Err AppPHSeqCfgGen(void)
   hs_loop.SWMatCfg.Dswitch = AppPHCfg.DswitchSel;
   hs_loop.SWMatCfg.Pswitch = AppPHCfg.PswitchSel;
   hs_loop.SWMatCfg.Nswitch = AppPHCfg.NswitchSel;
-  hs_loop.SWMatCfg.Tswitch = AppPHCfg.TswitchSel; //关键点1
+  hs_loop.SWMatCfg.Tswitch = AppPHCfg.TswitchSel; // 关键点
   AD5940_HSLoopCfgS(&hs_loop);
   //V_out = 1.11V - I * R_TIA
   AD5940_StructInit(&adc_base,sizeof(adc_base));
@@ -234,16 +234,16 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
-  //  开启电源
+  // 1. 开启电源
   AD5940_AFECtrlS(AFECTRL_ADCPWR | AFECTRL_HSTIAPWR | AFECTRL_SINC2NOTCH | AFECTRL_INAMPPWR | AFECTRL_EXTBUFPWR, bTRUE);
   AD5940_SEQGenInsert(SEQ_WAIT(16*80));
-  //  开启 ADC 转换
+  // 2. 开启 ADC 转换
   AD5940_AFECtrlS(AFECTRL_ADCCNV, bTRUE); 
-  // 2. 等待转换完成
+  // 3. 等待转换完成
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks)); 
-  // 3. 停止 ADC
+  // 4. 停止 ADC
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_ADCPWR, bFALSE);
-    /* 序列结束。 */
+    /* 序列结束 */
   error = AD5940_SEQGenFetchSeq(&pSeqCmd, &SeqLen);
   AD5940_SEQGenCtrl(bFALSE); /* 停止序列发生器 */
 
@@ -270,7 +270,7 @@ AD5940Err AppPHInit(uint32_t *pBuffer, uint32_t BufferSize)
 
     if(AD5940_WakeUp(10)>10)
       return AD5940ERR_WAKEUP;
-    // 配置序列器
+    // 配置序列
     seq_cfg.SeqMemSize = SEQMEMSIZE_2KB;
     seq_cfg.SeqBreakEn = bFALSE;
     seq_cfg.SeqIgnoreEn = bFALSE;
@@ -278,23 +278,23 @@ AD5940Err AppPHInit(uint32_t *pBuffer, uint32_t BufferSize)
     seq_cfg.SeqEnable = bFALSE;
     seq_cfg.SeqWrTimer = 0;
     AD5940_SEQCfg(&seq_cfg);
-    //重新初始化FIFO
+    // 重新初始化 FIFO
     fifo_cfg.FIFOEn = bTRUE;
     fifo_cfg.FIFOMode = FIFOMODE_FIFO;
     fifo_cfg.FIFOSize = FIFOSIZE_4KB;
-    fifo_cfg.FIFOSrc = FIFOSRC_SINC3; // ★ 改为 SINC3
-    fifo_cfg.FIFOThresh = 1;          // 只要有1个数据就中断
+    fifo_cfg.FIFOSrc = FIFOSRC_SINC3; // 改为 SINC3
+    fifo_cfg.FIFOThresh = 1;          // 只要有 1 个数据就中断
     AD5940_FIFOCfg(&fifo_cfg);
     AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
 
-    //如果第一次运行或者参数变化 → 重建序列
+    // 如果第一次运行或者参数变化，则重建序列
     if((AppPHCfg.PHInited == bFALSE)||\
       (AppPHCfg.bParaChanged == bTRUE))
     {
         if(pBuffer == 0)return AD5940ERR_PARA;
         if(BufferSize == 0) return AD5940ERR_PARA;
         AD5940_SEQGenInit(pBuffer,BufferSize);
-        /*重新生成初始化序列*/
+        // Regenerate initialization sequence.
         error = AppPHSeqCfgGen();
         if(error != AD5940ERR_OK)return error;
         //measure seq
@@ -330,7 +330,7 @@ AD5940Err AppPHISR(void *pBuff, uint32_t *pCount)
 
     if(AppPHCfg.PHInited == bFALSE)
     return AD5940ERR_APPERROR;
-    if(AD5940_WakeUp(10) > 10)  /* 通过读寄存器唤醒 AFE，最多读取 10 次 */
+    if(AD5940_WakeUp(10) > 10)  /* 通过读寄存器唤醒 AFE，最多读 10 次 */
     return AD5940ERR_WAKEUP;  /* 唤醒失败 */
 
     AD5940_SleepKeyCtrlS(SLPKEY_LOCK);
@@ -352,36 +352,37 @@ AD5940Err AppPHISR(void *pBuff, uint32_t *pCount)
 AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
 {
   // 1. 定义常量
-    const float VREF_ADC = 1.82f; // ADC 参考电压 (内部 1.82V)
+    const float VREF_ADC = 1.82f; // ADC 参考电压(内部 1.82V)
     const float RTIA_VAL = AppPHCfg.Rtia_Value_Ohm; 
     const uint32_t V_offset = AppPHCfg.Rtia_Value_Ohm;
-    // 注意：如果你改了配置里的电阻，这里也要改！
+    // 注意：如果你改了配置里的电阻，这里也要改
     
     // 2. 遍历数据
     for(int i=0; i<DataCount; i++)
     {
-        // 取出 16-bit 数据 (低 16 位有效，高位可能是通道 ID 或 0)
+        // 取低 16-bit 数据（低 16 位有效，高位可能是通道 ID 等）
         uint16_t rawCode = pData[i] & 0xFFFF; 
         
-        // 3. 转换为电压 (基于 ADC 配置: MuxN=1.11V, PGA=1)
+        // 3. 转换成电压（基于 ADC 配置: MuxN=1.11V, PGA=1）
         // AD5940 的 ADC 在 Sinc3 模式下，Code=0x8000 对应 0V 差分输入
-        // 即：(Vin_P - Vin_N) = 0V
-        // Code 转 Voltage 公式:
+        // 即 (Vin_P - Vin_N) = 0V
+        // Code 与 Voltage 关系：
         int32_t diff_code = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
         float voltage_diff = ((float)diff_code / 32768.0f) * VREF_ADC;
         
-        // 4. 转换为电流
+        // 4. 转换成电流
         // HSTIA 输出电压 Vout = Vbias - I * Rtia
         // ADC 测得的是 (Vout - Vbias) = - I * Rtia
         // 所以 I = - voltage_diff / Rtia
         float current_A = -voltage_diff / RTIA_VAL;
         float current_uA = current_A * 1e6f; // 转换为微安
 
-        // 5. 打印
-        Serial.printf("Index:%d, Code:0x%04X, VoltDiff: %.4f V, Current: %.4f uA\n", 
-                      i, rawCode, voltage_diff, current_uA);
+        // 5. 打印结果
+        Serial.printf("$PH,MEAS,%d,%lu,%u,%.6f,%.6f,%.2f,%u*\n",
+                      i + 1, (unsigned long)DataCount, (unsigned)rawCode,
+                      voltage_diff, current_uA, RTIA_VAL, (unsigned)AppPHCfg.ZeroOffset_Code);
         
-        // 6. (可选) 简单验证
+        // 6. (可选) 简单验算：
         // 如果你接了 1k 电阻到 GND (假设 Vbias=1.1V):
         // 预期电流 I = 1.1V / 1k = 1.1mA = 1100uA
         // 如果接了 1k 电阻到 0.6V (CE0):
@@ -389,5 +390,6 @@ AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
     }
     return AD5940ERR_OK;
 }
+
 
 

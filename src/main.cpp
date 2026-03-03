@@ -1,10 +1,10 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <SPI.h>
 
 #include "storage_manager.h"
 #include "mux_iface.h"
 #include "spi_hal.h"        
-//芯片驱动与Glue头文件
+// 芯片驱动与 Glue 头文件
 #include "ads124s08_board_glue.h"    
 #include "ads124s08_drv.h"  
 extern "C" {
@@ -12,15 +12,15 @@ extern "C" {
 }
 #include "ad5941_board_glue.h"   
 #include "ad5941PlatformCfg.h"
-//服务头文件
+// 服务头文件
 #include "temp_service.h" 
 #include "Conductivity_service.h"
 #include "ph_service.h"
 
 /* ====== 共用 SPI 总线引脚 ====== */
-static const int PIN_SCLK = 14; // ESP32 SPI 时钟线
-static const int PIN_MISO = 12; // ESP32 SPI MISO线
-static const int PIN_MOSI = 13; // ESP32 SPI MOSI线
+static const int PIN_SCLK = 14; // ESP32 SPI 时钟引脚
+static const int PIN_MISO = 12; // ESP32 SPI MISO 引脚
+static const int PIN_MOSI = 13; // ESP32 SPI MOSI 引脚
 /* ====== AD5941 特定引脚 ====== */
 static const int CS_AD5941    = 27; // AD5941 片选引脚
 static const int RESET_AD5941 = 26; // AD5941 复位引脚
@@ -47,15 +47,17 @@ float g_condStdValue = 1413.0f; // 默认标准液值
 float g_condCalStdValue = 0.0f;  // 三点校准当前点标准液值
 int g_condCalSlot = 0;           // 下一个要记录的校准点槽位(0/1/2)
 bool g_isCalibratingCond = false;
-// ===pH 服务标志位/全局变量 ===
+// === pH 服务标志位/全局变量 ===
 bool g_ispHMode = false;
 bool g_isCalibratingOffset = false; // 是否正在进行 Offset 校准
 bool g_isCalibratingGain = false;   // 是否正在校准增益
-float g_calResistorValue = 1000.0f; // 用户输入的校准电阻阻值 (默认为 1k)
+float g_calResistorValue = 1000.0f; // 用户输入的校准电阻阻值(默认 1k)
+uint8_t g_isfetChannel = 1;   // 默认 ISFET 通道
+
 // === ADS124S08 全局变量 ===
 // 创建一个 ADS124S08 驱动对象（此时还未初始化）
 ADS124S08_Drv* ads124s08 = nullptr;
-// ===Temperature 服务标志位/全局变量 ===
+// === Temperature 服务标志位/全局变量 ===
 TempService* g_tempSvc = nullptr;
 const double MY_RREF = 3300.0;
 bool is_calibrating = false;
@@ -65,9 +67,9 @@ bool g_isTempMode = false;
 enum SystemState {
   STATE_IDLE,             // 空闲状态
   STATE_TEMP_MEASURE,     // 温度测量
-  STATE_TEMP_CAL_P1,      // 温度校准点1
-  STATE_TEMP_CAL_P2,      // 温度校准点2
-  STATE_TEMP_CAL_P3,      // 温度校准点3
+  STATE_TEMP_CAL_P1,      // 温度校准点
+  STATE_TEMP_CAL_P2,      // 温度校准点
+  STATE_TEMP_CAL_P3,      // 温度校准点
   STATE_TEMP_SAVE_CAL,    // 温度保存校准
   STATE_TEMP_RESET_CAL,   // 温度重置校准
   STATE_TEMP_RESISTANCE,  // 读取原始电阻值
@@ -75,12 +77,13 @@ enum SystemState {
   STATE_COND_MEASURE,     // 电导率测量
   STATE_COND_SWEEP,       // 电导率扫频
   STATE_COND_CAL,         // 电导率电极常数校准
-  STATE_COND_CAL_P1,      // 电导率三点校准 点1
-  STATE_COND_CAL_P2,      // 电导率三点校准 点2
-  STATE_COND_CAL_P3,      // 电导率三点校准 点3
-  STATE_COND_SAVE_CAL,    // 电导率三点校准 计算保存
-  STATE_COND_RESET_CAL,   // 电导率三点校准 重置
+  STATE_COND_CAL_P1,      // 电导率三点校准点
+  STATE_COND_CAL_P2,      // 电导率三点校准点
+  STATE_COND_CAL_P3,      // 电导率三点校准点
+  STATE_COND_SAVE_CAL,    // 电导率三点校准计算保存
+  STATE_COND_RESET_CAL,   // 电导率三点校准重置
   STATE_PH_INIT,        // 电导率初始化
+  STATE_PH_CHANNEL,     //选择ph通道
   STATE_PH_MEASURE,       // pH 测量
   STATE_PH_CAL_OFFSET,    // pH Offset 校准
   STATE_PH_CAL_GAIN       // pH Gain 校准
@@ -98,7 +101,7 @@ void setup() {
   ChooseSenesingChannel(1);
   ChooseISFETChannel(1);
 
-  //初始化 SPI 总线
+  // 初始化 SPI 总线
   SpiHAL::beginBus(PIN_SCLK, PIN_MISO, PIN_MOSI);
   Serial.println("SPI bus initialized.");
   // --- 初始化 AD5941 --- //
@@ -128,10 +131,10 @@ void setup() {
   Serial.println("======================================");
   Serial.println(" ADS124S08 Setup Start");
   Serial.println("======================================");
-   // 1)  初始化 ADS124S08 SPI 总线
+   // 1) 初始化 ADS124S08 SPI 总线
   static SpiDevice ads_spidev(CS_ADS124S08, 4000000, MSBFIRST, SPI_MODE1);
   Serial.println("SpiDevice for AD5941 created.");
-  //  2)  定义 ADS124S08 的 Glue 配置
+  // 2) 定义 ADS124S08 的 Glue 配置
   AdsGlueConfig ads_cfg = {
     .spi = &ads_spidev,
     .pin_drdy = DRDY_ADS124S08,
@@ -171,7 +174,7 @@ void setup() {
   AppPHCfg.Rtia_Value_Ohm = phData.rtiaVal;
   Serial.printf("[Setup] Loaded pH Offset: %d, Rtia: %.2f\n", phData.offsetCode, phData.rtiaVal);
 
-  // 3. 读取并应用 温度 参数
+  // 3. 读取并应用温度参数
   // 假设你的 g_tempSvc 有一个方法叫 setCalib
   TempCalibData tempData = loadTempParams();
   if (tempData.valid) {
@@ -185,7 +188,7 @@ void setup() {
   } else {
      Serial.println("[Setup] No valid Temp Calibration found.");
   }
-  // 4. 读取并应用 电导率三点校准 参数
+  // 4. 读取并应用电导率三点校准参数
   CondCalibData condCalData = loadCondCalib();
   if (condCalData.valid) {
     g_condCalib.a = condCalData.a;
@@ -266,7 +269,7 @@ void loop() {
     break;
     case STATE_TEMP_RESET_CAL:
       {
-        TempService::CalibCoeff clean; // 默认是 valid=false
+        TempService::CalibCoeff clean; // 默认 valid=false
         g_tempSvc->setCalib(clean);
         Serial.println("Calibration Cleared.");
         currentState = STATE_IDLE;
@@ -487,16 +490,17 @@ break;
     // === 处理pH服务 ===
     case STATE_PH_INIT:
       ChooseSenesingChannel(3);
+      ChooseISFETChannel(g_isfetChannel);
       g_isCondMode = false;
       g_ispHMode = true;
       if(AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) 
       {
         AppCondCfg.CondInited = bFALSE;
-        Serial.println("pH Service Init OK!");
+        Serial.println("$PH,INIT,OK*");
       }
       else 
       {
-        Serial.println("pH Service Init FAILED!");
+        Serial.println("$ERR,PH,INIT_FAILED*");
         currentState = STATE_IDLE;
         break;
       } 
@@ -505,7 +509,7 @@ break;
     case STATE_PH_MEASURE:
       if(AppPHCfg.PHInited == bFALSE || g_ispHMode == false )
       {
-        Serial.println("pH Service haven't been initialized");
+        Serial.println("$ERR,PH,NOT_INITIALIZED*");
         currentState = STATE_IDLE;
         break;
       }
@@ -514,6 +518,7 @@ break;
         if (tempCount > 0) 
         {
           PHShowResult(AppBuff, tempCount);
+          Serial.printf("$PH,MEAS_DONE,%lu*\n", (unsigned long)tempCount);
           currentState = STATE_IDLE;
         }
       }
@@ -521,7 +526,7 @@ break;
     case STATE_PH_CAL_OFFSET:
       if(AppPHCfg.PHInited == bFALSE || g_ispHMode == false )
       {
-        Serial.println("pH Service haven't been initialized");
+        Serial.println("$ERR,PH,NOT_INITIALIZED*");
         currentState = STATE_IDLE;
         break;
       }
@@ -534,7 +539,7 @@ break;
           // 保存到配置中
           AppPHCfg.ZeroOffset_Code = measured_offset;
           savePhParams(measured_offset, AppPHCfg.Rtia_Value_Ohm);
-          Serial.printf(">>> Offset Calibrated! New Zero Code: 0x%04X (%d) <<<\n", measured_offset, measured_offset);
+          Serial.printf("$PH,CAL_OFFSET,OK,%u*\n", (unsigned)measured_offset);
           // 校准完成后，自动恢复开关设置到正常模式
           AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA; // 恢复连接传感器
           AppPHCfg.bParaChanged = bTRUE;
@@ -546,7 +551,7 @@ break;
     case STATE_PH_CAL_GAIN:
       if(AppPHCfg.PHInited == bFALSE || g_ispHMode == false )
       {
-        Serial.println("pH Service haven't been initialized");
+        Serial.println("$ERR,PH,NOT_INITIALIZED*");
         currentState = STATE_IDLE;
         break;
       }
@@ -565,20 +570,20 @@ break;
           // 3. 反推真实 RTIA
           // 原理: |Volt| = I_ideal * R_tia_real
           //       I_ideal = 1.1V / R_ext
-          // 所以: R_tia_real = (|Volt| * R_ext) / 1.1V
+          // 所以 R_tia_real = (|Volt| * R_ext) / 1.1V
           if (abs_volt > 0.05f) // 确保有足够电压，防止除零或噪声干扰
           { 
             float calculated_rtia = (abs_volt * g_calResistorValue) / 1.1f;
             // 4. 更新系统参数
             AppPHCfg.Rtia_Value_Ohm = calculated_rtia;
             savePhParams(AppPHCfg.ZeroOffset_Code, calculated_rtia);
-            Serial.printf(">>> Gain Calibrated! Raw:0x%04X, Vdiff:%.4fV, New RTIA: %.2f Ohm <<<\n", 
-            rawCode, voltage_diff, calculated_rtia);
+            Serial.printf("$PH,CAL_GAIN,OK,%.2f,%.1f,%u,%.6f*\n",
+                          calculated_rtia, g_calResistorValue, (unsigned)rawCode, voltage_diff);
             currentState = STATE_IDLE;
           }
           else 
           {
-            Serial.printf(">>> Error: Signal too low (%.4fV). Is resistor connected? <<<\n", abs_volt);
+            Serial.printf("$ERR,PH,SIGNAL_LOW,%.6f*\n", abs_volt);
             currentState = STATE_IDLE;
           }
         }
@@ -598,7 +603,7 @@ void handleSerialCommand() {
     // === 指令: "temp read" -> 读取一次温度值 ===
     if(cmd == "temp read")
     {
-    if (currentState != STATE_IDLE) {        // ← 加这一行
+    if (currentState != STATE_IDLE) {        // 增加这一段
         Serial.println("$ERR,BUSY*");
         return;
     }
@@ -762,33 +767,33 @@ void handleSerialCommand() {
           Serial.println("$ERR,COND,Frequency set failed*");
       }
     }
-    // === pH值指令 ===
+    // === pH 值指令 ===
     else if (cmd == "ph init") 
     {
       ChooseSenesingChannel(3);
-      Serial.println("[CMD] Initializing pH Measurement...");
+      Serial.println("$PH,INIT,START*");
       currentState = STATE_PH_INIT;
     }
     else if (cmd == "ph read") 
     {
       if (!g_ispHMode) 
       {
-        Serial.println("Not in pH Mode");
+        Serial.println("$ERR,PH,NOT_IN_PH_MODE*");
         return;
       }
       ChooseSenesingChannel(2);
-      Serial.println("[CMD] Triggering Single pH Measurement...");
+      Serial.println("$PH,MEAS,START*");
       currentState = STATE_PH_MEASURE;
       AppPHCtrl(PHCTRL_START, 0);
     }
     else if (cmd == "ph cal offset") {
       if (!g_ispHMode) 
       {
-        Serial.println("Not in pH Mode");
+        Serial.println("$ERR,PH,NOT_IN_PH_MODE*");
         return;
       }
       ChooseSenesingChannel(3);
-      Serial.println("[CMD] Calibrating pH Offset (Disconnecting Input)...");
+      Serial.println("$PH,CAL_OFFSET,START*");
       // 1. 修改配置：断开所有开关
       AppPHCfg.TswitchSel =  SWT_TRTIA; 
       // 2. 标记参数已改变，并重新初始化序列
@@ -799,24 +804,24 @@ void handleSerialCommand() {
           AppPHCtrl(PHCTRL_START, 0);
           currentState = STATE_PH_CAL_OFFSET;
       } else {
-          Serial.println("pH Cal Init Failed!");
+          Serial.println("$ERR,PH,CAL_OFFSET_INIT_FAILED*");
       }
     }
     else if (cmd.startsWith("ph cal gain")) {
       if (!g_ispHMode) 
       {
-        Serial.println("Not in pH Mode");
+        Serial.println("$ERR,PH,NOT_IN_PH_MODE*");
         return;
       }
       ChooseSenesingChannel(3);
         // 1. 解析输入的电阻值
-        String valStr = cmd.substring(11); // "ph cal gain" 长度是 11
+        String valStr = cmd.substring(11); // "ph cal gain" 长度为 11
         valStr.trim();
         if (valStr.length() > 0) {
             float r_val = valStr.toFloat();
             if (r_val > 0) {
                 g_calResistorValue = r_val;
-                Serial.printf("[CMD] Calibrating Gain with R_ext = %.1f Ohm...\n", g_calResistorValue);
+                Serial.printf("$PH,CAL_GAIN,START,%.1f*\n", g_calResistorValue);
 
                 // 2. 确保开关是连接状态 (AIN0 + TRTIA)
                 // 如果之前跑了 offset 校准，开关可能是断开的，这里要连回去
@@ -831,14 +836,46 @@ void handleSerialCommand() {
                     AppPHCtrl(PHCTRL_START, 0);
                     currentState = STATE_PH_CAL_GAIN;
                 } else {
-                    Serial.println("Gain Cal Init Failed!");
+                    Serial.println("$ERR,PH,CAL_GAIN_INIT_FAILED*");
                 }
             } else {
-                Serial.println("Invalid Resistor Value!");
+                Serial.println("$ERR,PH,INVALID_RESISTOR*");
             }
         } else {
-            Serial.println("Usage: ph cal gain <ohms> (e.g., ph cal gain 1000)");
+            Serial.println("$ERR,PH,USAGE_CAL_GAIN,ph cal gain <ohms>*");
         }
+    }
+    else if (cmd.startsWith("ph isfet "))
+    {
+      // 可选：忙状态保护
+      if (currentState != STATE_IDLE) {
+        Serial.println("$ERR,BUSY*");
+        return;
+      }
+
+      String chStr = cmd.substring(9); // "ph isfet " 后面的内容
+      chStr.trim();
+
+      // 严格校验：必须全是数字
+      bool numeric = chStr.length() > 0;
+      for (size_t i = 0; i < chStr.length() && numeric; ++i) {
+        if (!isDigit((unsigned char)chStr[i])) numeric = false;
+      }
+
+      if (!numeric) {
+        Serial.println("$ERR,PH,ISFET_INVALID*");
+        return;
+      }
+
+      int ch = chStr.toInt();
+      if (ch < 1 || ch > 8) {
+        Serial.println("$ERR,PH,ISFET_INVALID*");
+        return;
+      }
+
+      g_isfetChannel = (uint8_t)ch;
+      ChooseISFETChannel(g_isfetChannel);
+      Serial.printf("$PH,ISFET,OK,%d*\n", g_isfetChannel);
     }
     // === 指令: "factory reset" -> 恢复默认校准参数 ===
     else if (cmd == "factory reset") {
@@ -853,7 +890,7 @@ void handleSerialCommand() {
       Serial.println("   Cond K_Cell -> 1.0, BiasVolt -> 0.0V");
 
       // --- pH 默认值 ---
-      AppPHCfg.ZeroOffset_Code = 32768; // ADC半量程
+      AppPHCfg.ZeroOffset_Code = 32768; // ADC 半量程
       AppPHCfg.Rtia_Value_Ohm = AppCondCfg.HstiaRtiaSel;
       Serial.println("   pH Offset -> 32768, Gain -> 1000.0");
 
@@ -862,7 +899,7 @@ void handleSerialCommand() {
       g_tempSvc->setCalib(clean);
       Serial.println("   Temp Cal -> Cleared");
       // 3. 强制重新初始化各个服务，让参数生效
-      //    (由于参数改了，需要告诉 AD5941 重新加载)
+      //    (由于参数改了，需要告知 AD5941 重新加载)
       Serial.println(">>> Factory Reset Complete. Please Restart or Init Sensors. <<<");
     }
 
