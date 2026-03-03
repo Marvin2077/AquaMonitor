@@ -781,7 +781,7 @@ void handleSerialCommand() {
         Serial.println("$ERR,PH,NOT_IN_PH_MODE*");
         return;
       }
-      ChooseSenesingChannel(2);
+      ChooseSenesingChannel(3);
       Serial.println("$PH,MEAS,START*");
       currentState = STATE_PH_MEASURE;
       AppPHCtrl(PHCTRL_START, 0);
@@ -828,7 +828,7 @@ void handleSerialCommand() {
                 AppPHCfg.DswitchSel = SWD_OPEN;
                 AppPHCfg.PswitchSel = SWP_PL | SWP_PL2;
                 AppPHCfg.NswitchSel = SWN_OPEN;
-                AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA; 
+                AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA; 
                 // 3. 重新初始化序列以应用开关设置
                 AppPHCfg.bParaChanged = bTRUE;
                 if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
