@@ -15,8 +15,8 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.LpdacSel = LPDAC0;
     // 设置 VBIAS = 1.2V (0x745)
     AppPHCfg.DacData12Bit = 0x745;
-    // 设置 VZERO = 1.0V (0x17)
-    AppPHCfg.DacData6Bit = 0x17;
+    // 设置 VZERO = 1.1V (0x1C)
+    AppPHCfg.DacData6Bit = 0x1C;
     if (AppPHCfg.DacData12Bit > (AppPHCfg.DacData6Bit * 64)) 
     {
     // 如果 VBIAS 更大，手动减去 1 LSB 进行补偿
