@@ -13,11 +13,11 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.PHInited = bFALSE;
     //LPDAC
     AppPHCfg.LpdacSel = LPDAC0;
-    // 设置 VBIAS = 1.2V (0x745)
-    AppPHCfg.DacData12Bit = 0x745;
-    // 设置 VZERO = 1.1V (0x1C)
-    AppPHCfg.DacData6Bit = 0x1C;
-    if (AppPHCfg.DacData12Bit > (AppPHCfg.DacData6Bit * 64)) 
+    // 设置 VBIAS = 1.21V (Source)
+    AppPHCfg.DacData12Bit = 0x760;
+    // 设置 VZERO = 1.1V (Gate)
+    AppPHCfg.DacData6Bit = 0x14;
+    if (AppPHCfg.DacData12Bit < (AppPHCfg.DacData6Bit * 64)) 
     {
     // 如果 VBIAS 更大，手动减去 1 LSB 进行补偿
     AppPHCfg.DacData12Bit = AppPHCfg.DacData12Bit - 1; 
@@ -60,7 +60,7 @@ AD5940Err AppPHCfg_init()
 
     //Calibration
     AppPHCfg.ZeroOffset_Code = 32768; // 默认中点 (对应 0V)
-    AppPHCfg.Rtia_Value_Ohm = 1000.0f; // 默认 1k
+    AppPHCfg.Rtia_Value_Ohm = AppPHCfg.HstiaRtiaSel;
     return AD5940ERR_OK;
 
 }
@@ -185,8 +185,8 @@ AD5940Err AppPHSeqCfgGen(void)
   AD5940_StructInit(&adc_filter,sizeof(adc_filter));
   adc_filter.ADCAvgNum = ADCAVGNUM_16;
   adc_filter.ADCRate = ADCRATE_1P6MHZ;
-  adc_filter.ADCSinc2Osr = ADCSINC2OSR_22;
-  adc_filter.ADCSinc3Osr = ADCSINC3OSR_4;
+  adc_filter.ADCSinc2Osr = ADCSINC2OSR_1333;
+  adc_filter.ADCSinc3Osr = ADCSINC3OSR_2;
   adc_filter.BpNotch = bTRUE;
   adc_filter.BpSinc3 = bFALSE;
   adc_filter.Sinc2NotchEnable = bTRUE;
@@ -224,19 +224,20 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   uint32_t WaitClks;
   ClksCalInfo_Type clks_cal;
-  clks_cal.DataType = DATATYPE_SINC3;
-  clks_cal.DataCount = 1;
-  clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
-  clks_cal.ADCSinc2Osr = ADCSINC2OSR_22;
+  //clks_cal.DataType = DATATYPE_SINC3;
+  clks_cal.DataType = DATATYPE_SINC2;
+  clks_cal.DataCount = 10;
+  //clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
+  clks_cal.ADCSinc2Osr = ADCSINC2OSR_1333;
   clks_cal.ADCAvgNum = ADCAVGNUM_16;
-  clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;;
+  clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;
   AD5940_ClksCalculate(&clks_cal,&WaitClks);
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
   // 1. 开启电源
   AD5940_AFECtrlS(AFECTRL_ADCPWR | AFECTRL_HSTIAPWR | AFECTRL_SINC2NOTCH | AFECTRL_INAMPPWR | AFECTRL_EXTBUFPWR, bTRUE);
-  AD5940_SEQGenInsert(SEQ_WAIT(16*80));
+  AD5940_SEQGenInsert(SEQ_WAIT(32*250));
   // 2. 开启 ADC 转换
   AD5940_AFECtrlS(AFECTRL_ADCCNV, bTRUE); 
   // 3. 等待转换完成
@@ -282,8 +283,9 @@ AD5940Err AppPHInit(uint32_t *pBuffer, uint32_t BufferSize)
     fifo_cfg.FIFOEn = bTRUE;
     fifo_cfg.FIFOMode = FIFOMODE_FIFO;
     fifo_cfg.FIFOSize = FIFOSIZE_4KB;
-    fifo_cfg.FIFOSrc = FIFOSRC_SINC3; // 改为 SINC3
-    fifo_cfg.FIFOThresh = 1;          // 只要有 1 个数据就中断
+    fifo_cfg.FIFOSrc = FIFOSRC_SINC2NOTCH; // 数据源改为 SINC2 滤波器输出
+    //fifo_cfg.FIFOSrc = FIFOSRC_SINC3; // 数据源改为 SINC2 滤波器输出
+    fifo_cfg.FIFOThresh = 1;              
     AD5940_FIFOCfg(&fifo_cfg);
     AD5940_INTCClrFlag(AFEINTSRC_ALLINT);
 

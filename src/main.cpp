@@ -892,7 +892,7 @@ void handleSerialCommand() {
       // --- pH 默认值 ---
       AppPHCfg.ZeroOffset_Code = 32768; // ADC 半量程
       AppPHCfg.Rtia_Value_Ohm = AppCondCfg.HstiaRtiaSel;
-      Serial.println("   pH Offset -> 32768, Gain -> 1000.0");
+      //Serial.println("   pH Offset -> 32768, Gain -> 160000.0");
 
       // --- 温度默认值 ---
       TempService::CalibCoeff clean; // 默认构造函数通常是全0且valid=false
