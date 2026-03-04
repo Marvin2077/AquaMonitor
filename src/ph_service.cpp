@@ -56,8 +56,18 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.PswitchSel = SWP_PL|SWP_PL2;
     AppPHCfg.NswitchSel = SWN_OPEN;
     AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA;
+    //ADC Basic settings
+    AppPHCfg.ADCMuxN = ADCMUXN_VSET1P1;
+    AppPHCfg.ADCMuxP = ADCMUXP_HSTIA_P;
+    AppPHCfg.ADCPga  = ADCPGA_1;
     //ADC Filter
-
+    AppPHCfg.ADCAvgNum = ADCAVGNUM_16;
+    AppPHCfg.ADCRate = ADCRATE_1P6MHZ;
+    AppPHCfg.ADCSinc2Osr = ADCSINC2OSR_1333;
+    AppPHCfg.ADCSinc3Osr = ADCSINC3OSR_4;
+    AppPHCfg.BpNotch = bTRUE;
+    AppPHCfg.BpSinc3 = bFALSE;
+    AppPHCfg.Sinc2NotchEnable = bTRUE;
     //Calibration
     AppPHCfg.ZeroOffset_Code = 32768; // 默认中点 (对应 0V)
     AppPHCfg.Rtia_Value_Ohm = AppPHCfg.HstiaRtiaSel;
@@ -177,19 +187,19 @@ AD5940Err AppPHSeqCfgGen(void)
   AD5940_HSLoopCfgS(&hs_loop);
   //V_out = 1.11V - I * R_TIA
   AD5940_StructInit(&adc_base,sizeof(adc_base));
-  adc_base.ADCMuxN = ADCMUXN_VSET1P1;
-  adc_base.ADCMuxP = ADCMUXP_HSTIA_P;
-  adc_base.ADCPga  = ADCPGA_1;
+  adc_base.ADCMuxN = AppPHCfg.ADCMuxN;
+  adc_base.ADCMuxP = AppPHCfg.ADCMuxP;
+  adc_base.ADCPga  = AppPHCfg.ADCPga;
   AD5940_ADCBaseCfgS(&adc_base);
 
   AD5940_StructInit(&adc_filter,sizeof(adc_filter));
-  adc_filter.ADCAvgNum = ADCAVGNUM_16;
-  adc_filter.ADCRate = ADCRATE_1P6MHZ;
-  adc_filter.ADCSinc2Osr = ADCSINC2OSR_1333;
-  adc_filter.ADCSinc3Osr = ADCSINC3OSR_2;
-  adc_filter.BpNotch = bTRUE;
-  adc_filter.BpSinc3 = bFALSE;
-  adc_filter.Sinc2NotchEnable = bTRUE;
+  adc_filter.ADCAvgNum = AppPHCfg.ADCAvgNum;
+  adc_filter.ADCRate = AppPHCfg.ADCRate;
+  adc_filter.ADCSinc2Osr = AppPHCfg.ADCSinc2Osr;
+  adc_filter.ADCSinc3Osr = AppPHCfg.ADCSinc3Osr;
+  adc_filter.BpNotch = AppPHCfg.BpNotch;
+  adc_filter.BpSinc3 = AppPHCfg.BpSinc3;
+  adc_filter.Sinc2NotchEnable = AppPHCfg.Sinc2NotchEnable;
   AD5940_ADCFilterCfgS(&adc_filter);
   
 
@@ -224,10 +234,10 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   uint32_t WaitClks;
   ClksCalInfo_Type clks_cal;
-  //clks_cal.DataType = DATATYPE_SINC3;
+  clks_cal.DataType = DATATYPE_SINC3;
   clks_cal.DataType = DATATYPE_SINC2;
   clks_cal.DataCount = 10;
-  //clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
+  clks_cal.ADCSinc3Osr = ADCSINC3OSR_4;
   clks_cal.ADCSinc2Osr = ADCSINC2OSR_1333;
   clks_cal.ADCAvgNum = ADCAVGNUM_16;
   clks_cal.RatioSys2AdcClk = AppPHCfg.SysClkFreq/AppPHCfg.AdcClkFreq;
@@ -342,8 +352,8 @@ AD5940Err AppPHISR(void *pBuff, uint32_t *pCount)
       FIFOCnt = AD5940_FIFOGetCnt();
       if(FIFOCnt > 0)
       {
-        AD5940_FIFORd((uint32_t *)pBuff,FIFOCnt);
-        *pCount = FIFOCnt;
+        AD5940_FIFORd((uint32_t *)pBuff,FIFOCnt); //从FIFO读取数据
+        *pCount = FIFOCnt; //FIFO读出数据的个数
       }
       AD5940_INTCClrFlag(AFEINTSRC_DATAFIFOTHRESH);
       AD5940_ClrMCUIntFlag();

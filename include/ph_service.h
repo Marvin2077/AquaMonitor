@@ -58,6 +58,18 @@ typedef struct
     uint32_t PswitchSel;
     uint32_t NswitchSel;
     uint32_t TswitchSel;
+    //ADC Basic settings
+    uint32_t ADCMuxN;
+    uint32_t ADCMuxP;
+    uint32_t ADCPga;
+    //ADC Filter
+    uint32_t  ADCAvgNum;
+    uint32_t  ADCRate;
+    uint32_t  ADCSinc2Osr;
+    uint32_t  ADCSinc3Osr;
+    BoolFlag  BpNotch;
+    BoolFlag  BpSinc3;
+    BoolFlag  Sinc2NotchEnable;
     // Calibration
     float    Rtia_Value_Ohm;
     uint32_t ZeroOffset_Code;
