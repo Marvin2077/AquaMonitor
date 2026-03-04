@@ -2,7 +2,7 @@
 Preferences prefs;
 #define DEFAULT_COND_K  1.0f         // 默认电极常数
 #define DEFAULT_PH_OFF  32768        // 默认中点 (ADC半量程)
-#define DEFAULT_PH_RTIA 160000.0f       // 默认反馈电阻 (根据你的硬件填)
+#define DEFAULT_PH_RTIA 170000.0f       // 默认反馈电阻 (根据你的硬件填)
 void writeDeviceID(int id)
 {
     prefs.begin(NVS_NS, false);
