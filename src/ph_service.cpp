@@ -245,14 +245,14 @@ AD5940Err AppPHSeqMeasureGen(void)
 
   AD5940_SEQGenCtrl(bTRUE);
   AD5940_ADCMuxCfgS(ADCMUXP_HSTIA_P, ADCMUXN_VSET1P1);
-  // 1. 开启电源
+  // 1. 开启电源 Power on
   AD5940_AFECtrlS(AFECTRL_ADCPWR | AFECTRL_HSTIAPWR | AFECTRL_SINC2NOTCH | AFECTRL_INAMPPWR | AFECTRL_EXTBUFPWR, bTRUE);
   AD5940_SEQGenInsert(SEQ_WAIT(32*250));
-  // 2. 开启 ADC 转换
+  // 2. 开启 ADC 转换 Start ADC Conversion
   AD5940_AFECtrlS(AFECTRL_ADCCNV, bTRUE); 
-  // 3. 等待转换完成
+  // 3. 等待转换完成 Wait until the conversion finish
   AD5940_SEQGenInsert(SEQ_WAIT(WaitClks)); 
-  // 4. 停止 ADC
+  // 4. 停止 ADC Power Off
   AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_ADCPWR, bFALSE);
     /* 序列结束 */
   error = AD5940_SEQGenFetchSeq(&pSeqCmd, &SeqLen);
