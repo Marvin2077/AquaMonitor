@@ -16,6 +16,10 @@ extern "C" {
 #include "temp_service.h" 
 #include "Conductivity_service.h"
 #include "ph_service.h"
+//指令解析与发送头文件
+#include "app_globals.h"
+#include "command_parser.h"
+#include "command_dispatcher.h"
 
 /* ====== 共用 SPI 总线引脚 ====== */
 static const int PIN_SCLK = 14; // ESP32 SPI 时钟引脚
@@ -63,31 +67,7 @@ const double MY_RREF = 3300.0;
 bool is_calibrating = false;
 double currentTemp = 0.0;
 bool g_isTempMode = false;
-// === 有限状态机变量 ===
-enum SystemState {
-  STATE_IDLE,             // 空闲状态
-  STATE_TEMP_MEASURE,     // 温度测量
-  STATE_TEMP_CAL_P1,      // 温度校准点
-  STATE_TEMP_CAL_P2,      // 温度校准点
-  STATE_TEMP_CAL_P3,      // 温度校准点
-  STATE_TEMP_SAVE_CAL,    // 温度保存校准
-  STATE_TEMP_RESET_CAL,   // 温度重置校准
-  STATE_TEMP_RESISTANCE,  // 读取原始电阻值
-  STATE_COND_INIT,        // 电导率初始化
-  STATE_COND_MEASURE,     // 电导率测量
-  STATE_COND_SWEEP,       // 电导率扫频
-  STATE_COND_CAL,         // 电导率电极常数校准
-  STATE_COND_CAL_P1,      // 电导率三点校准点
-  STATE_COND_CAL_P2,      // 电导率三点校准点
-  STATE_COND_CAL_P3,      // 电导率三点校准点
-  STATE_COND_SAVE_CAL,    // 电导率三点校准计算保存
-  STATE_COND_RESET_CAL,   // 电导率三点校准重置
-  STATE_PH_INIT,        // 电导率初始化
-  STATE_PH_CHANNEL,     //选择ph通道
-  STATE_PH_MEASURE,       // pH 测量
-  STATE_PH_CAL_OFFSET,    // pH Offset 校准
-  STATE_PH_CAL_GAIN       // pH Gain 校准
-};
+
 // 当前状态变量，初始化为空闲
 SystemState currentState = STATE_IDLE;
 
@@ -599,55 +579,17 @@ void handleSerialCommand() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim(); // 去掉回车换行
 
-    // === 温度指令 ===
-    // === 指令: "temp read" -> 读取一次温度值 ===
-    if(cmd == "temp read")
-    {
-    if (currentState != STATE_IDLE) {        // 增加这一段
-        Serial.println("$ERR,BUSY*");
-        return;
-    }
-      Serial.println("[CMD] Measuring Temperature");
-      currentState = STATE_TEMP_MEASURE;
-    }
-    // === 指令: "temp cal 25" -> 校准 0度点 ===
-    else if (cmd == "temp cal 25") {
-      Serial.println("[CMD] Measuring Point 1 (25.0 C)... Keep sensor stable.");
-      currentState = STATE_TEMP_CAL_P1;
-    }
-    
-    // === 指令: "temp cal 35" -> 校准 35度点 ===
-    else if (cmd == "temp cal 35") {
-      Serial.println("[CMD] Measuring Point 2 (35.0 C)...");
-      currentState = STATE_TEMP_CAL_P2;
+
+    ParsedCommand parsed = parseCommand(cmd);
+    if (parsed.valid) {
+          dispatchCommand(parsed);
+          return;
     }
 
-    // === 指令: "temp cal 50" -> 校准 50度点 ===
-    else if (cmd == "temp cal 50") {
-      Serial.println("[CMD] Measuring Point 3 (50.0 C)...");
-      currentState = STATE_TEMP_CAL_P3;
-    }
-
-    // === 指令: "temp save" -> 计算并生效 ===
-    else if (cmd == "temp save") {
-      Serial.println("[CMD] Computing temperature calibration coefficients...");
-      currentState = STATE_TEMP_SAVE_CAL;
-    }
-
-    // === 指令: "temp reset" -> 清除温度校准 ===
-    else if (cmd == "temp reset") {
-      Serial.println("[CMD] Resetting temperature calibration coefficients...");
-      currentState = STATE_TEMP_RESET_CAL;
-    }
-    // === 指令: "temp resistance" -> 读取原始电阻值 ===
-    else if (cmd == "temp resistance") {
-      Serial.println("[CMD] Reading raw resistance...");
-      currentState = STATE_TEMP_RESISTANCE;
-    }
 
     // === 电导率指令 ===
     // === 指令: "cond read" -> 触发一次阻抗测量 ===
-    else if (cmd == "cond init") {
+    if (cmd == "cond init") {
       Serial.println("[CMD] Init conductivity service...");      
       currentState = STATE_COND_INIT;
     }    
