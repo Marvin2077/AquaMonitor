@@ -10,7 +10,20 @@ ParsedCommand parseCommand(const String& raw) {
     else if (raw == "temp save")       { cmd.type = CmdType::TEMP_SAVE;       cmd.valid = true; }
     else if (raw == "temp reset")      { cmd.type = CmdType::TEMP_RESET;      cmd.valid = true; }
     else if (raw == "temp resistance") { cmd.type = CmdType::TEMP_RESISTANCE; cmd.valid = true; }
-    
+    else if (raw.startsWith("SET_TEMP_CALIB ")) {                                                 // 新增
+        // 格式: SET_TEMP_CALIB <a> <b> <c>
+        String params = raw.substring(15); // 跳过 "SET_TEMP_CALIB "
+        params.trim();
+        int sp1 = params.indexOf(' ');
+        int sp2 = params.indexOf(' ', sp1 + 1);
+        if (sp1 > 0 && sp2 > sp1) {
+            cmd.dA = params.substring(0, sp1).toDouble();
+            cmd.dB = params.substring(sp1 + 1, sp2).toDouble();
+            cmd.dC = params.substring(sp2 + 1).toDouble();
+            cmd.type  = CmdType::TEMP_SET_CALIB;
+            cmd.valid = true;
+        }
+    }
     // 电导率
     else if (raw == "cond init")      { cmd.type = CmdType::COND_INIT;  cmd.valid = true; }
     else if (raw == "cond read")      { cmd.type = CmdType::COND_READ;  cmd.valid = true; }

@@ -44,6 +44,25 @@ void dispatchCommand(const ParsedCommand& cmd) {
         Serial.println("[CMD] Reading raw resistance...");
         currentState = STATE_TEMP_RESISTANCE;
         break;
+    case CmdType::TEMP_GET_CALIB:
+    {
+        TempService::CalibCoeff c = g_tempSvc->getCalib();
+        Serial.printf("$TEMP,CALIB,%.8f,%.8f,%.8f,%d*\n",
+                      c.a, c.b, c.c, c.valid ? 1 : 0);
+        break;
+    }
+    case CmdType::TEMP_SET_CALIB:
+    {
+        TempService::CalibCoeff c;
+        c.a     = cmd.dA;
+        c.b     = cmd.dB;
+        c.c     = cmd.dC;
+        c.valid = true;
+        g_tempSvc->setCalib(c);
+        saveTempParams((float)c.a, (float)c.b, (float)c.c, true);
+        Serial.println("$TEMP,CALIB,SET,OK*");
+        break;
+    }
     case CmdType::COND_INIT:
         currentState = STATE_COND_INIT;
         break;

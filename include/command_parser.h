@@ -10,6 +10,8 @@ enum class CmdType {
     TEMP_SAVE,
     TEMP_RESET,
     TEMP_RESISTANCE,
+    TEMP_GET_CALIB,
+    TEMP_SET_CALIB,   // fParam 不够用，需要扩展 ParsedCommand 存 a/b/c
     
     // 电导率
     COND_INIT,
@@ -37,6 +39,7 @@ struct ParsedCommand {
     float   fParam = 0.0f;
     int     iParam = 0;
     bool    valid  = false;
+    double dA = 0.0, dB = 1.0, dC = 0.0;
 };
 
 ParsedCommand parseCommand(const String& raw);
