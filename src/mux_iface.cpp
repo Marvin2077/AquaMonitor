@@ -75,7 +75,6 @@ void ChooseISFETChannel(int channel)
         digitalWrite(ISFET_MUX_ADDR2,LOW);
         digitalWrite(ISFET_MUX_ADDR1,LOW);
         digitalWrite(ISFET_MUX_ADDR0,HIGH);
-        //余氯
         break;
     case 3:
         //ADDR2 - 0 ADDR1 - 1 ADDR0 - 0 -> S3
@@ -100,7 +99,6 @@ void ChooseISFETChannel(int channel)
         digitalWrite(ISFET_MUX_ADDR2,HIGH);
         digitalWrite(ISFET_MUX_ADDR1,LOW);
         digitalWrite(ISFET_MUX_ADDR0,HIGH);
-        //余氯
         break;
     case 7:
         //ADDR2 - 1 ADDR1 - 1 ADDR0 - 0 -> S7

@@ -163,8 +163,7 @@ void dispatchCommand(const ParsedCommand& cmd) {
     case CmdType::PH_SET_ISFET:
         if (currentState != STATE_IDLE) { Serial.println("$ERR,BUSY*"); return; }
         g_isfetChannel = (uint8_t)cmd.iParam;
-        ChooseISFETChannel(g_isfetChannel);
-        Serial.printf("$PH,ISFET,OK,%d*\n", g_isfetChannel);
+        currentState = STATE_PH_CHANNEL;  
         break;
 
     case CmdType::FACTORY_RESET:
