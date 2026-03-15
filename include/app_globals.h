@@ -41,6 +41,7 @@ extern bool    g_isCondMode;
 extern bool    g_isSweepMode;
 extern int     g_sweepCount;
 extern int     g_sweepTotalPoints;
+extern float   g_condStdValue;
 extern float   g_condCalStdValue;
 extern int     g_condCalSlot;
 
