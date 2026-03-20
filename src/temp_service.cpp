@@ -139,9 +139,7 @@ bool TempService::measure(double& out_temp)
     return false;
   }
   // 2. 转换温度
-  double t_raw = resistanceToTemp(r_meas);
-  // 3. 应用校准系数
-  out_temp = applyCalib(t_raw);
+  out_temp = resistanceToTemp(r_meas);
   return true;
 
 }

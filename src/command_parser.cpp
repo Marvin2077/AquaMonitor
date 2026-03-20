@@ -10,6 +10,7 @@ ParsedCommand parseCommand(const String& raw) {
     else if (raw == "temp save")       { cmd.type = CmdType::TEMP_SAVE;       cmd.valid = true; }
     else if (raw == "temp reset")      { cmd.type = CmdType::TEMP_RESET;      cmd.valid = true; }
     else if (raw == "temp resistance") { cmd.type = CmdType::TEMP_RESISTANCE; cmd.valid = true; }
+    else if (raw == "GET_TEMP_CALIB")  { cmd.type = CmdType::TEMP_GET_CALIB; cmd.valid = true; }
     else if (raw.startsWith("SET_TEMP_CALIB ")) {                                                 // 新增
         // 格式: SET_TEMP_CALIB <a> <b> <c>
         String params = raw.substring(15); // 跳过 "SET_TEMP_CALIB "
@@ -24,6 +25,7 @@ ParsedCommand parseCommand(const String& raw) {
             cmd.valid = true;
         }
     }
+
     // 电导率
     else if (raw == "cond init")      { cmd.type = CmdType::COND_INIT;  cmd.valid = true; }
     else if (raw == "cond read")      { cmd.type = CmdType::COND_READ;  cmd.valid = true; }
