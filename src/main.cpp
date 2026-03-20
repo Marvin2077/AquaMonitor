@@ -170,16 +170,7 @@ void setup() {
      Serial.println("[Setup] No valid Temp Calibration found.");
   }
   // 4. 读取并应用电导率三点校准参数
-  CondCalibData condCalData = loadCondCalib();
-  if (condCalData.valid) {
-    g_condCalib.a = condCalData.a;
-    g_condCalib.b = condCalData.b;
-    g_condCalib.c = condCalData.c;
-    g_condCalib.valid = true;
-    Serial.println("[Setup] Loaded Cond 3-Point Calibration.");
-  } else {
-    Serial.println("[Setup] No valid Cond 3-Point Calibration found.");
-  }
+
   //完成芯片和服务初始化
   Serial.println("System Initialized");
 }
@@ -207,12 +198,6 @@ void loop() {
     case STATE_COND_INIT:        processCondInit();       break;
     case STATE_COND_MEASURE:     processCondMeasure();    break;
     case STATE_COND_SWEEP:       processCondSweep();      break;
-    case STATE_COND_CAL:         processCondCal();        break;
-    case STATE_COND_CAL_P1:      processCondCalPoint();   break;
-    case STATE_COND_CAL_P2:      processCondCalPoint();   break;
-    case STATE_COND_CAL_P3:      processCondCalPoint();   break;
-    case STATE_COND_SAVE_CAL:    processCondSaveCal();    break;
-    case STATE_COND_RESET_CAL:   processCondResetCal();   break;
     case STATE_PH_INIT:          processPhInit();         break;
     case STATE_PH_MEASURE:       processPhMeasure();      break;
     case STATE_PH_CAL_OFFSET:    processPhCalOffset();    break;

@@ -74,38 +74,6 @@ void dispatchCommand(const ParsedCommand& cmd) {
         currentState = STATE_COND_MEASURE;
         break;
 
-    case CmdType::COND_SET_STD:
-        g_condStdValue = cmd.fParam;
-        Serial.printf("$COND,STD_SET,%.2f*\n", cmd.fParam);
-        break; 
-
-    case CmdType::COND_CAL_KCELL:
-        if (!g_isCondMode) { Serial.println("$ERR,COND,Not in Conductivity Mode*"); return; }
-        ChooseSenesingChannel(1);
-        AppCondCtrl(CondCTRL_START, 0);
-        currentState = STATE_COND_CAL;
-        break;
-
-    case CmdType::COND_CAL_POINT:
-        if (!g_isCondMode) { Serial.println("$ERR,COND,Not in Conductivity Mode*"); return; }
-        if (g_condCalSlot > 2) { Serial.println("$ERR,COND,All 3 points recorded*"); return; }
-        g_condCalStdValue = cmd.fParam;
-        ChooseSenesingChannel(1);
-        AppCondCtrl(CondCTRL_START, 0);
-        if      (g_condCalSlot == 0) currentState = STATE_COND_CAL_P1;
-        else if (g_condCalSlot == 1) currentState = STATE_COND_CAL_P2;
-        else                         currentState = STATE_COND_CAL_P3;
-        Serial.printf("[CMD] Recording cond cal point %d, std=%.2f\n", g_condCalSlot + 1, cmd.fParam);
-        break;
-
-    case CmdType::COND_SAVE:
-        currentState = STATE_COND_SAVE_CAL;
-        break;
-
-    case CmdType::COND_RESET:
-        currentState = STATE_COND_RESET_CAL;
-        break;
-
     case CmdType::COND_SWEEP:
         if (!g_isCondMode) { Serial.println("$ERR,COND,Not in Conductivity Mode*"); return; }
         if (g_isSweepMode) { Serial.println("$ERR,COND,Already sweeping*"); return; }

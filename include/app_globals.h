@@ -17,11 +17,6 @@ enum SystemState {
     STATE_COND_MEASURE,
     STATE_COND_SWEEP,
     STATE_COND_CAL,
-    STATE_COND_CAL_P1,
-    STATE_COND_CAL_P2,
-    STATE_COND_CAL_P3,
-    STATE_COND_SAVE_CAL,
-    STATE_COND_RESET_CAL,
     STATE_PH_INIT,
     STATE_PH_CHANNEL,
     STATE_PH_MEASURE,
@@ -42,8 +37,6 @@ extern bool    g_isSweepMode;
 extern int     g_sweepCount;
 extern int     g_sweepTotalPoints;
 extern float   g_condStdValue;
-extern float   g_condCalStdValue;
-extern int     g_condCalSlot;
 
 // === pH ===
 extern bool    g_ispHMode;

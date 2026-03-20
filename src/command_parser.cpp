@@ -29,23 +29,12 @@ ParsedCommand parseCommand(const String& raw) {
     // 电导率
     else if (raw == "cond init")      { cmd.type = CmdType::COND_INIT;  cmd.valid = true; }
     else if (raw == "cond read")      { cmd.type = CmdType::COND_READ;  cmd.valid = true; }
-    else if (raw == "cond save")      { cmd.type = CmdType::COND_SAVE;  cmd.valid = true; }
-    else if (raw == "cond reset")     { cmd.type = CmdType::COND_RESET; cmd.valid = true; }
     else if (raw == "cond sweep")     { cmd.type = CmdType::COND_SWEEP; cmd.valid = true; }
-    else if (raw == "cond cal kcell") { cmd.type = CmdType::COND_CAL_KCELL; cmd.valid = true; }
-    // ⚠️ 注意：必须在 startsWith("cond cal ") 之前判断，否则 kcell 会被误匹配
-    else if (raw.startsWith("cond std ")) {
-        float v = raw.substring(9).toFloat();
-        if (v > 0.0f) { cmd.type = CmdType::COND_SET_STD; cmd.fParam = v; cmd.valid = true; }
-    }
-    else if (raw.startsWith("cond cal ")) {
-        float v = raw.substring(9).toFloat();
-        if (v > 0.0f) { cmd.type = CmdType::COND_CAL_POINT; cmd.fParam = v; cmd.valid = true; }
-    }
     else if (raw.startsWith("cond freq ")) {
         float v = raw.substring(10).toFloat();
         if (v >= 2000.0f && v <= 200000.0f) { cmd.type = CmdType::COND_SET_FREQ; cmd.fParam = v; cmd.valid = true; }
     }
+    //pH值
     else if (raw == "ph init")        { cmd.type = CmdType::PH_INIT;       cmd.valid = true; }
     else if (raw == "ph read")        { cmd.type = CmdType::PH_READ;       cmd.valid = true; }
     else if (raw == "ph cal offset")  { cmd.type = CmdType::PH_CAL_OFFSET; cmd.valid = true; }

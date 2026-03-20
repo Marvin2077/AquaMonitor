@@ -13,10 +13,6 @@ void processTempResistance();
 void processCondInit();
 void processCondMeasure();
 void processCondSweep();
-void processCondCal();
-void processCondCalPoint();   // P1/P2/P3 共用同一个函数体
-void processCondSaveCal();
-void processCondResetCal();
 
 // pH
 void processPhInit();

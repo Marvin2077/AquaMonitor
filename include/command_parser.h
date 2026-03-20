@@ -16,11 +16,6 @@ enum class CmdType {
     // 电导率
     COND_INIT,
     COND_READ,
-    COND_SET_STD,       // cond std <value>   → fParam = 标液值
-    COND_CAL_KCELL,     // cond cal kcell
-    COND_CAL_POINT,     // cond cal <value>   → fParam = 标液值
-    COND_SAVE,
-    COND_RESET,
     COND_SWEEP,
     COND_SET_FREQ,      // cond freq <value>  → fParam = 频率
     // pH
