@@ -102,6 +102,16 @@ void dispatchCommand(const ParsedCommand& cmd) {
             Serial.println("$ERR,COND,Frequency set failed*");
         }
         break;
+    case CmdType::COND_SET_VPP:
+        if(!g_isCondMode) { Serial.println("$ERR,COND,Not in Conductivity Mode*"); return; }
+        AppCondCfg.DacVoltPP = cmd.fParam;
+        AppCondCfg.bParaChanged = bTRUE;
+        if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
+            Serial.printf("$COND,VPP_SET,%.2f*\n", cmd.fParam);
+        } else {
+            Serial.println("$ERR,COND,Vpp set failed*");
+        }
+        break;
 
     case CmdType::PH_INIT:
         ChooseSenesingChannel(3);

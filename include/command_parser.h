@@ -18,6 +18,7 @@ enum class CmdType {
     COND_READ,
     COND_SWEEP,
     COND_SET_FREQ,      // cond freq <value>  → fParam = 频率
+    COND_SET_VPP,
     // pH
     PH_INIT,
     PH_READ,

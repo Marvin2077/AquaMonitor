@@ -34,6 +34,10 @@ ParsedCommand parseCommand(const String& raw) {
         float v = raw.substring(10).toFloat();
         if (v >= 2000.0f && v <= 200000.0f) { cmd.type = CmdType::COND_SET_FREQ; cmd.fParam = v; cmd.valid = true; }
     }
+    else if (raw.startsWith("cond vpp ")){
+        float vpp = raw.substring(9).toFloat();
+        if (vpp>= 50.0f && vpp <= 800.0f) { cmd.type = CmdType::COND_SET_VPP; cmd.fParam = vpp; cmd.valid = true;}
+    }
     //pH值
     else if (raw == "ph init")        { cmd.type = CmdType::PH_INIT;       cmd.valid = true; }
     else if (raw == "ph read")        { cmd.type = CmdType::PH_READ;       cmd.valid = true; }

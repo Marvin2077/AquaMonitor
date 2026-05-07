@@ -23,12 +23,12 @@ AD5940Err AppCondCfg_init(){
     AppCondCfg.RcalVal = 1000.0; /* 1k 欧姆 */
 
     AppCondCfg.PwrMod = AFEPWR_HP;
-    AppCondCfg.HstiaRtiaSel = HSTIARTIA_1K;
+    AppCondCfg.HstiaRtiaSel = HSTIARTIA_200;
     AppCondCfg.CtiaSel = 4;
     AppCondCfg.ExcitBufGain = EXCITBUFGAIN_2;
     AppCondCfg.HsDacGain = HSDACGAIN_1;
     AppCondCfg.HsDacUpdateRate = 7;
-    AppCondCfg.DacVoltPP = 600.0;
+    AppCondCfg.DacVoltPP = 300.0;
     AppCondCfg.BiasVolt = -0.0f;
 
     AppCondCfg.SinFreq = 10000.0; /* 10000 赫兹 */
@@ -49,9 +49,9 @@ AD5940Err AppCondCfg_init(){
 
     AppCondCfg.SweepCfg.SweepEn = bFALSE;
     AppCondCfg.SweepCfg.SweepStart = 1000.0;
-    AppCondCfg.SweepCfg.SweepStop = 100000.0;
+    AppCondCfg.SweepCfg.SweepStop = 200000.0;
     AppCondCfg.SweepCfg.SweepPoints = 50;
-    AppCondCfg.SweepCfg.SweepLog = bFALSE;
+    AppCondCfg.SweepCfg.SweepLog = bTRUE;
     AppCondCfg.SweepCfg.SweepIndex = 0;
 
     AppCondCfg.FifoThresh = 4; /* 当 SweepEn = bTRUE 时必须为 4 */

@@ -26,22 +26,31 @@ void ChooseSenesingChannel(int channel)
     {
      case 1:
         //ADDR1 - 0 ADDR0 - 0  -> S1A & S1B
-        //Impedance
+        //Conductivity
         digitalWrite(CHANNEL_MUX_ADDR1,LOW);
         digitalWrite(CHANNEL_MUX_ADDR0,LOW);
         break;
     case 2:
         //ADDR1 - 0 ADDR0 - 1 -> S2A & S2B
+        //pH值
         digitalWrite(CHANNEL_MUX_ADDR1,LOW);
         digitalWrite(CHANNEL_MUX_ADDR0,HIGH);
-        //余氯
+        
         break;
     case 3:
         //ADDR1 - 1 ADDR0 - 0 -> S3A & S3B
+        //余氯 暂未启用
         digitalWrite(CHANNEL_MUX_ADDR1,HIGH);
         digitalWrite(CHANNEL_MUX_ADDR0,LOW);
         break;
-        // pH值
+        
+    case 4:
+        //ADDR1 - 1 ADDR0 - 1 -> S4A & S4B
+        // S4B AIN0 校准HSTIA的RTIA
+        digitalWrite(CHANNEL_MUX_ADDR1,HIGH);
+        digitalWrite(CHANNEL_MUX_ADDR0,HIGH);
+        break;
+        
     default:
         //ADDR0 - 0 ADDR1 - 0 -> S1A & S1B
         Serial.print("Default Sensing Channel");
