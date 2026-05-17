@@ -1,4 +1,6 @@
 #include "Conductivity_service.h"
+#include "debug_log.h"
+#include "protocol_writer.h"
 #include "Arduino.h"
 
 AppCondCfg_Type AppCondCfg;
@@ -28,10 +30,10 @@ AD5940Err AppCondCfg_init(){
     AppCondCfg.ExcitBufGain = EXCITBUFGAIN_2;
     AppCondCfg.HsDacGain = HSDACGAIN_1;
     AppCondCfg.HsDacUpdateRate = 7;
-    AppCondCfg.DacVoltPP = 300.0;
+    AppCondCfg.DacVoltPP = 100.0;
     AppCondCfg.BiasVolt = -0.0f;
 
-    AppCondCfg.SinFreq = 10000.0; /* 10000 赫兹 */
+    AppCondCfg.SinFreq = 20000.0; /* 20000 赫兹 */
 
     AppCondCfg.ADCPgaGain = ADCPGA_1;
     AppCondCfg.ADCSinc3Osr = ADCSINC3OSR_2;
@@ -49,8 +51,8 @@ AD5940Err AppCondCfg_init(){
 
     AppCondCfg.SweepCfg.SweepEn = bFALSE;
     AppCondCfg.SweepCfg.SweepStart = 1000.0;
-    AppCondCfg.SweepCfg.SweepStop = 200000.0;
-    AppCondCfg.SweepCfg.SweepPoints = 50;
+    AppCondCfg.SweepCfg.SweepStop = 150000.0;
+    AppCondCfg.SweepCfg.SweepPoints = 100;
     AppCondCfg.SweepCfg.SweepLog = bTRUE;
     AppCondCfg.SweepCfg.SweepIndex = 0;
 
@@ -354,7 +356,7 @@ static AD5940Err AppCondSeqMeasureGen(void)
   }
   else
     return error; /* 错误 */
-  Serial.printf("[DEBUG] SeqLen = %d\n", SeqLen);
+  LOG_DEBUG_PRINTF("[DEBUG] SeqLen = %d\n", SeqLen);
   return AD5940ERR_OK;
 }
 
@@ -596,7 +598,7 @@ int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sw
     if(isSweep)
     {
       // $COND,SWEEP,<point_index>,<total_points>,<freq_Hz>,<mag_Ohm>,<phase_deg>,<real_Ohm>,<imag_Ohm>,<G_uS>*
-      Serial.printf("$COND,SWEEP,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f*\n",
+      Protocol::linef("$COND,SWEEP,%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f*",
                     sweepIndex, sweepTotal,
                     freq, mag, phase, R, X,
                     G_uS);
@@ -604,7 +606,7 @@ int32_t CondShowResult(uint32_t *pData, uint32_t DataCount, bool isSweep, int sw
     else
     {
       // $COND,MEAS,<freq_Hz>,<mag_Ohm>,<phase_deg>,<real_Ohm>,<imag_Ohm>,<G_uS>*
-      Serial.printf("$COND,MEAS,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f*\n",
+      Protocol::linef("$COND,MEAS,%.2f,%.2f,%.2f,%.2f,%.2f,%.4f*",
                     freq, mag, phase, R, X,
                     G_uS);
     }

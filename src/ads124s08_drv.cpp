@@ -1,4 +1,5 @@
 #include "ads124s08_drv.h"
+#include "debug_log.h"
 #include "math.h"
 // ===== 内部工具 =====
 bool ADS124S08_Drv::sendCmd(uint8_t cmd) {
@@ -169,7 +170,7 @@ bool ADS124S08_Drv::defaultConfig() {
   }
 
   // 8) 写后读回校验（已为您实现打印功能）
-Serial.println("--- Verifying Register Settings ---"); // 打印一个标题，方便查看
+LOG_DEBUG_PRINTLN("--- Verifying Register Settings ---");
 struct { Reg r; const char* name; } toCheck[] = {
   {Reg::INPMUX,   "INPMUX"},
   {Reg::PGA_GAIN, "PGA"},
@@ -185,13 +186,12 @@ bool all_ok = true; // 添加一个标志来跟踪校验结果
 for (auto& x : toCheck) {
   uint8_t v = 0;
   if (!readRegisters(static_cast<uint8_t>(x.r), &v, 1)) {
-    Serial.printf("Failed to read register: %s\n", x.name);
+    LOG_DEBUG_PRINTF("Failed to read register: %s\n", x.name);
     all_ok = false;
     continue; // 读取失败，继续检查下一个
   }
   
-  // 使用 Serial.printf 打印读回的值
-  Serial.printf("  [CHECK] %-8s = 0x%02X\n", x.name, v);
+  LOG_DEBUG_PRINTF("  [CHECK] %-8s = 0x%02X\n", x.name, v);
   
   // 您还可以在这里加入判断，如果读回的值和您写入的值不符，就报错
   // 例如，检查 DATARATE 寄存器：
@@ -202,11 +202,11 @@ for (auto& x : toCheck) {
 }
 
 if (!all_ok) {
-    Serial.println("--- Verification FAILED! ---");
+    LOG_DEBUG_PRINTLN("--- Verification FAILED! ---");
     return false; // 如果有任何一个寄存器校验失败，则配置失败
 }
 
-Serial.println("--- Verification PASSED ---");
+LOG_DEBUG_PRINTLN("--- Verification PASSED ---");
   // 9) 启动连续转换
   return start();
 }
@@ -245,9 +245,15 @@ bool ADS124S08_Drv::readPT1000Temperature(float r_ref, float& temperature)
     return false;
   }
 
-  
-
-
-
+  constexpr double R0 = 1000.0;
+  constexpr double A = 3.9083e-3;
+  constexpr double B = -5.775e-7;
+  double z = 1.0 - (r_rtd / R0);
+  double discriminant = (A * A) - (4.0 * B * z);
+  if (discriminant < 0.0) {
+    return false;
+  }
+  temperature = static_cast<float>((-A + sqrt(discriminant)) / (2.0 * B));
+  return true;
 }
 

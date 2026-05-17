@@ -8,18 +8,24 @@ static const char* NVS_NS  = "dev";  // 命名空间
 static const char* KEY_ID  = "id";   // key 名字
 
 static const char* KEY_COND_K = "cond_k";      // 电导率电极常数
+static const char* KEY_COND_K_VERSION = "cond_k_ver";
+static const char* KEY_COND_K_VALID = "cond_k_v";
 static const char* KEY_PH_OFF = "ph_off";      // pH Zero Offset
 static const char* KEY_PH_RTIA = "ph_rtia";    // pH Rtia (Gain)
+static const char* KEY_PH_VERSION = "ph_ver";
+static const char* KEY_PH_VALID = "ph_valid";
 static const char* KEY_TEMP_A = "temp_a";      // 温度系数 A
 static const char* KEY_TEMP_B = "temp_b";      // 温度系数 B
 static const char* KEY_TEMP_C = "temp_c";      // 温度系数 C
 static const char* KEY_TEMP_VALID = "temp_v";  // 温度校准是否有效
+static const char* KEY_TEMP_VERSION = "temp_ver";
 
 // 电导率三点校准参数
 static const char* KEY_COND_CAL_A = "cond_a";      // 电导率校准系数 A
 static const char* KEY_COND_CAL_B = "cond_b";      // 电导率校准系数 B
 static const char* KEY_COND_CAL_C = "cond_c";      // 电导率校准系数 C
 static const char* KEY_COND_CAL_VALID = "cond_v";  // 电导率校准是否有效
+static const char* KEY_COND_CAL_VERSION = "cond_ver";
 
 void writeDeviceID(int id);
 int readDeviceID();

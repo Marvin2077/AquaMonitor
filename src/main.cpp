@@ -21,6 +21,9 @@ extern "C" {
 #include "command_parser.h"
 #include "command_dispatcher.h"
 #include "state_processors.h"
+#include "debug_log.h"
+#include "protocol_writer.h"
+#include "serial_command_reader.h"
 
 /* ====== 共用 SPI 总线引脚 ====== */
 static const int PIN_SCLK = 14; // ESP32 SPI 时钟引脚
@@ -71,6 +74,14 @@ bool g_isTempMode = false;
 
 // 当前状态变量，初始化为空闲
 SystemState currentState = STATE_IDLE;
+uint32_t g_stateEnteredMs = 0;
+
+void setSystemState(SystemState nextState) {
+  if (currentState != nextState) {
+    currentState = nextState;
+    g_stateEnteredMs = millis();
+  }
+}
 
 void setup() {
   //读取Device id
@@ -84,51 +95,52 @@ void setup() {
 
   // 初始化 SPI 总线
   SpiHAL::beginBus(PIN_SCLK, PIN_MISO, PIN_MOSI);
-  Serial.println("SPI bus initialized.");
+  LOG_DEBUG_PRINTLN("SPI bus initialized.");
   // --- 初始化 AD5941 --- //
-  Serial.println("======================================");
-  Serial.println(" AD5941 Setup Start ");
-  Serial.println("======================================");
+  LOG_DEBUG_PRINTLN("======================================");
+  LOG_DEBUG_PRINTLN(" AD5941 Setup Start ");
+  LOG_DEBUG_PRINTLN("======================================");
   
   // 1) 创建 AD5941 的 SpiDevice 对象
   static SpiDevice ad5941_spidev(CS_AD5941, 8000000 /* 8MHz */, MSBFIRST, SPI_MODE0);
-  Serial.println("SpiDevice for AD5941 created.");
+  LOG_DEBUG_PRINTLN("SpiDevice for AD5941 created.");
 
   // 2) 配置并初始化 AD5941 Glue 层
   Ad5941Glue::Config cfg;
   cfg.spi = &ad5941_spidev;
   cfg.pin_reset = RESET_AD5941;
   Ad5941Glue::setup(cfg);
-  Serial.println("Ad5941Glue setup complete.");
+  LOG_DEBUG_PRINTLN("Ad5941Glue setup complete.");
   // 3) 执行硬件复位
   Ad5941Glue::hardware_reset(1000, 100);
-  Serial.println("AD5941 hardware reset performed.");
-  if(AD5941PlatformCfg() == AD5940ERR_OK)
-  {
-    Serial.println("AD5941 Platform Configuration performed.");
+  LOG_DEBUG_PRINTLN("AD5941 hardware reset performed.");
+  if(AD5941PlatformCfg() == AD5940ERR_OK) {
+    LOG_DEBUG_PRINTLN("AD5941 Platform Configuration performed.");
+  } else {
+    Protocol::error("AD5941", "PLATFORM_CONFIG_FAILED");
   }
 
   // --- 初始化 ADS124S08 --- //
-  Serial.println("======================================");
-  Serial.println(" ADS124S08 Setup Start");
-  Serial.println("======================================");
+  LOG_DEBUG_PRINTLN("======================================");
+  LOG_DEBUG_PRINTLN(" ADS124S08 Setup Start");
+  LOG_DEBUG_PRINTLN("======================================");
    // 1) 初始化 ADS124S08 SPI 总线
   static SpiDevice ads_spidev(CS_ADS124S08, 4000000, MSBFIRST, SPI_MODE1);
-  Serial.println("SpiDevice for AD5941 created.");
+  LOG_DEBUG_PRINTLN("SpiDevice for ADS124S08 created.");
   // 2) 定义 ADS124S08 的 Glue 配置
   AdsGlueConfig ads_cfg = {
     .spi = &ads_spidev,
     .pin_drdy = DRDY_ADS124S08,
     .pin_reset = RESET_ADS124S08
   };
-  Serial.println("Making ADS124S08 HAL...");
+  LOG_DEBUG_PRINTLN("Making ADS124S08 HAL...");
   ADS124S08_Drv::Hal ads_hal = BoardGlue::make_ads_hal(ads_cfg);
   // 3) 创建ADS124S08驱动实例
   ads124s08 = new ADS124S08_Drv(ads_hal);
-  Serial.println("ADS124S08 Driver instance created.");
-  Serial.println("Configuring ADS124S08...");
+  LOG_DEBUG_PRINTLN("ADS124S08 Driver instance created.");
+  LOG_DEBUG_PRINTLN("Configuring ADS124S08...");
   if (!ads124s08->defaultConfig()) {
-    Serial.println("!!! ADS124S08 configuration FAILED! Halting. !!!");
+    Protocol::error("ADS124S08", "CONFIG_FAILED");
     while (1) { delay(1000); }
   }
   // --- 完成ADS124S08芯片的初始化 --- //
@@ -138,7 +150,7 @@ void setup() {
   tsCfg.Rref_ohm = MY_RREF; 
   tsCfg.pga_gain = 2;      
   g_tempSvc = new TempService(*ads124s08, tsCfg);
-  Serial.println("ADS124S08 configuration successful.");
+  LOG_DEBUG_PRINTLN("ADS124S08 configuration successful.");
   // --- 初始化 AD5941 服务结构体 --- //
 
   //初始化应用参数结构体
@@ -147,13 +159,13 @@ void setup() {
   // 1. 读取并应用电导率参数
   float saved_K = loadCondParams();
   AppCondCfg.K_Cell = saved_K;
-  Serial.printf("[Setup] Loaded Cond K_Cell: %.4f\n", saved_K);
+  LOG_DEBUG_PRINTF("[Setup] Loaded Cond K_Cell: %.4f\n", saved_K);
 
   // 2. 读取并应用 pH 参数
   PhCalibData phData = loadPhParams();
   AppPHCfg.ZeroOffset_Code = phData.offsetCode;
   AppPHCfg.Rtia_Value_Ohm = phData.rtiaVal;
-  Serial.printf("[Setup] Loaded pH Offset: %d, Rtia: %.2f\n", phData.offsetCode, phData.rtiaVal);
+  LOG_DEBUG_PRINTF("[Setup] Loaded pH Offset: %d, Rtia: %.2f\n", phData.offsetCode, phData.rtiaVal);
 
   // 3. 读取并应用温度参数
   // 假设你的 g_tempSvc 有一个方法叫 setCalib
@@ -165,22 +177,33 @@ void setup() {
      c.c = tempData.c;
      // c.valid = true; // 如果你的结构体里有 valid
      g_tempSvc->setCalib(c); 
-     Serial.println("[Setup] Loaded Temp Calibration.");
+     LOG_DEBUG_PRINTLN("[Setup] Loaded Temp Calibration.");
   } else {
-     Serial.println("[Setup] No valid Temp Calibration found.");
+     LOG_DEBUG_PRINTLN("[Setup] No valid Temp Calibration found.");
   }
   // 4. 读取并应用电导率三点校准参数
 
   //完成芯片和服务初始化
-  Serial.println("System Initialized");
+  Protocol::line("$SYS,READY*");
 }
 
 
 void loop() {
   static uint32_t last_time = 0;
-  uint32_t tempCount = APPBUFF_SIZE;
+  static SystemState lastState = STATE_IDLE;
+
+  if (currentState != lastState) {
+    g_stateEnteredMs = millis();
+    lastState = currentState;
+  }
   
   handleSerialCommand();
+
+  if (currentState != lastState) {
+    g_stateEnteredMs = millis();
+    lastState = currentState;
+  }
+
   // 定时触发部分：每 500ms
   if (millis() - last_time > 500) {
     last_time = millis();
@@ -209,16 +232,18 @@ void loop() {
 
 
 void handleSerialCommand() {
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim(); // 去掉回车换行
-
-
+  String cmd;
+  SerialReadResult result = readSerialCommandLine(cmd);
+  if (result == SerialReadResult::OVERFLOW) {
+    Protocol::error("SERIAL", "LINE_TOO_LONG");
+    return;
+  }
+  if (result == SerialReadResult::LINE_READY) {
     ParsedCommand parsed = parseCommand(cmd);
     if (parsed.valid) {
           dispatchCommand(parsed);
           return;
     }
-    Serial.println("$ERR,UNKNOWN_CMD*");
+    Protocol::error("SYS", "UNKNOWN_CMD");
   }
 }

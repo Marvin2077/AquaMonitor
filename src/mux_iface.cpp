@@ -1,4 +1,5 @@
 #include "mux_iface.h"
+#include "debug_log.h"
 void MUXPinInit(void)
 {
   // 初始化测量通道MUX的地址引脚
@@ -53,7 +54,7 @@ void ChooseSenesingChannel(int channel)
         
     default:
         //ADDR0 - 0 ADDR1 - 0 -> S1A & S1B
-        Serial.print("Default Sensing Channel");
+        LOG_DEBUG_PRINTLN("Default Sensing Channel");
         digitalWrite(17|18,LOW);
         break;
     }
@@ -123,7 +124,7 @@ void ChooseISFETChannel(int channel)
         break;
     default:
         //ADDR2 - 0 ADDR1 - 0 ADDR0 - 0 -> S1
-        Serial.print("Default ISFET Channel");
+        LOG_DEBUG_PRINTLN("Default ISFET Channel");
         digitalWrite(ISFET_MUX_ADDR2,LOW);
         digitalWrite(ISFET_MUX_ADDR1,LOW);
         digitalWrite(ISFET_MUX_ADDR0,LOW);

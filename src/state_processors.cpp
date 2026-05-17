@@ -5,69 +5,84 @@
 #include "ph_service.h"
 #include "storage_manager.h"
 #include "mux_iface.h"
+#include "protocol_writer.h"
 #include <Arduino.h>
 
 extern uint32_t AppBuff[];   // 定义在 main.cpp
 
+namespace {
+constexpr uint32_t COND_MEASURE_TIMEOUT_MS = 15000;
+constexpr uint32_t COND_SWEEP_TIMEOUT_MS = 120000;
+constexpr uint32_t PH_MEASURE_TIMEOUT_MS = 15000;
+constexpr uint32_t PH_CAL_TIMEOUT_MS = 15000;
+
+bool stateTimedOut(uint32_t timeoutMs) {
+    return currentState != STATE_IDLE && (millis() - g_stateEnteredMs) > timeoutMs;
+}
+}
+
     void processTempMeasure(){
-        g_tempSvc->measure(currentTemp);
-        Serial.printf("$TEMP,MEAS,%.3f*\n", currentTemp);
-        currentState = STATE_IDLE;
+        if (g_tempSvc->measure(currentTemp)) {
+            Protocol::linef("$TEMP,MEAS,%.3f*", currentTemp);
+        } else {
+            Protocol::error("TEMP", "MEASURE_FAILED");
+        }
+        setSystemState(STATE_IDLE);
     }
 
     void processTempCalP1() {
         if (g_tempSvc->recordCalibPoint(0, 25.0)) {
-            Serial.println("$TEMP,CAL_PT,1,25.0,OK*");
+            Protocol::line("$TEMP,CAL_PT,1,25.0,OK*");
         } else {
-            Serial.println("$ERR,TEMP,Point 1 Failed*");
+            Protocol::error("TEMP", "CAL_PT1_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     void processTempCalP2() {
         if (g_tempSvc->recordCalibPoint(1, 35.0)) {
-            Serial.println("$TEMP,CAL_PT,2,35.0,OK*");
+            Protocol::line("$TEMP,CAL_PT,2,35.0,OK*");
         } else {
-            Serial.println("Point 2 Failed!");
+            Protocol::error("TEMP", "CAL_PT2_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     void processTempCalP3() {
         if (g_tempSvc->recordCalibPoint(2, 50.0)) {
-            Serial.println("Point 3 Saved!");
+            Protocol::line("$TEMP,CAL_PT,3,50.0,OK*");
         } else {
-            Serial.println("Point 3 Failed!");
+            Protocol::error("TEMP", "CAL_PT3_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     void processTempSaveCal() {
         if (g_tempSvc->finishCalibration()) {
             auto c = g_tempSvc->getCalib();
             saveTempParams(c.a, c.b, c.c, true);
-            Serial.printf("Calibration DONE! a=%.6f, b=%.6f, c=%.6f\n", c.a, c.b, c.c);
+            Protocol::linef("$TEMP,CALIB,OK,%.6f,%.6f,%.6f*", c.a, c.b, c.c);
         } else {
-            Serial.println("Calibration Calculation Failed (Check points?)");
+            Protocol::error("TEMP", "CALIB_CALC_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     void processTempResetCal() {
         TempService::CalibCoeff clean;
         g_tempSvc->setCalib(clean);
-        Serial.println("Calibration Cleared.");
-        currentState = STATE_IDLE;
+        Protocol::line("$TEMP,CALIB,RESET,OK*");
+        setSystemState(STATE_IDLE);
     }
 
     void processTempResistance() {
         double r_ohm = 0.0;
         if (g_tempSvc->readResistance(r_ohm)) {
-            Serial.printf("$TEMP,RES,%.2f*\n", r_ohm);
+            Protocol::linef("$TEMP,RES,%.2f*", r_ohm);
         } else {
-            Serial.println("[ERR] Resistance read failed");
+            Protocol::error("TEMP", "RESISTANCE_READ_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     // =========================================================
@@ -80,25 +95,28 @@ extern uint32_t AppBuff[];   // 定义在 main.cpp
         ChooseSenesingChannel(1);
         if (AppCondInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
             AppPHCfg.PHInited = bFALSE;
-            Serial.println("$COND,INIT,OK*");
+            Protocol::line("$COND,INIT,OK*");
         } else {
-            Serial.println("$ERR,COND,Init failed*");
+            Protocol::error("COND", "INIT_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     void processCondMeasure() {
         uint32_t tempCount = APPBUFF_SIZE;
         if (AppCondCfg.CondInited == bFALSE || g_isCondMode == false) {
-            Serial.println("$ERR,COND,Not initialized*");
-            currentState = STATE_IDLE;
+            Protocol::error("COND", "NOT_INITIALIZED");
+            setSystemState(STATE_IDLE);
             return;
         }
-        if (AppCondISR(AppBuff, &tempCount) == 0) {
-            if (tempCount > 0) {
-                CondShowResult(AppBuff, tempCount, false, 0, 0);
-                currentState = STATE_IDLE;
-            }
+        if (AppCondISR(AppBuff, &tempCount) == 0 && tempCount > 0) {
+            CondShowResult(AppBuff, tempCount, false, 0, 0);
+            setSystemState(STATE_IDLE);
+            return;
+        }
+        if (stateTimedOut(COND_MEASURE_TIMEOUT_MS)) {
+            Protocol::error("COND", "MEASURE_TIMEOUT");
+            setSystemState(STATE_IDLE);
         }
     }
 
@@ -109,27 +127,34 @@ extern uint32_t AppBuff[];   // 定义在 main.cpp
             g_sweepCount  = 0;
             AppCondCfg.SweepCfg.SweepEn    = bFALSE;
             AppCondCfg.SweepCfg.SweepIndex = 0;
-            Serial.println("$ERR,COND,Not initialized*");
-            currentState = STATE_IDLE;
+            Protocol::error("COND", "NOT_INITIALIZED");
+            setSystemState(STATE_IDLE);
             return;
         }
-        if (AppCondISR(AppBuff, &tempCount) == 0) {
-            if (tempCount > 0) {
-                CondShowResult(AppBuff, tempCount, true, g_sweepCount + 1, g_sweepTotalPoints);
-                g_sweepCount++;
-                if (g_sweepCount < g_sweepTotalPoints) {
-                    AppCondCtrl(CondCTRL_START, 0);
-                } else {
-                    Serial.println("$COND,SWEEP_END*");
-                    g_isSweepMode = false;
-                    g_sweepCount  = 0;
-                    AppCondCfg.SweepCfg.SweepIndex = 0;
-                    AppCondCfg.SweepCfg.SweepEn    = bFALSE;
-                    AppCondCfg.bParaChanged         = bTRUE;
-                    AppCondInit(AppBuff, APPBUFF_SIZE);
-                    currentState = STATE_IDLE;
-                }
+        if (AppCondISR(AppBuff, &tempCount) == 0 && tempCount > 0) {
+            CondShowResult(AppBuff, tempCount, true, g_sweepCount + 1, g_sweepTotalPoints);
+            g_sweepCount++;
+            if (g_sweepCount < g_sweepTotalPoints) {
+                AppCondCtrl(CondCTRL_START, 0);
+            } else {
+                Protocol::line("$COND,SWEEP_END*");
+                g_isSweepMode = false;
+                g_sweepCount  = 0;
+                AppCondCfg.SweepCfg.SweepIndex = 0;
+                AppCondCfg.SweepCfg.SweepEn    = bFALSE;
+                AppCondCfg.bParaChanged         = bTRUE;
+                AppCondInit(AppBuff, APPBUFF_SIZE);
+                setSystemState(STATE_IDLE);
             }
+            return;
+        }
+        if (stateTimedOut(COND_SWEEP_TIMEOUT_MS)) {
+            Protocol::error("COND", "SWEEP_TIMEOUT");
+            g_isSweepMode = false;
+            g_sweepCount  = 0;
+            AppCondCfg.SweepCfg.SweepEn    = bFALSE;
+            AppCondCfg.SweepCfg.SweepIndex = 0;
+            setSystemState(STATE_IDLE);
         }
     }
 
@@ -139,86 +164,149 @@ extern uint32_t AppBuff[];   // 定义在 main.cpp
     // =========================================================
 
     void processPhInit() {
-        ChooseSenesingChannel(3);
+        ChooseSenesingChannel(2);
         ChooseISFETChannel(g_isfetChannel);
         g_isCondMode = false;
         g_ispHMode   = true;
         if (AppPHInit(AppBuff, APPBUFF_SIZE) == AD5940ERR_OK) {
             AppCondCfg.CondInited = bFALSE;
-            Serial.println("$PH,INIT,OK*");
+            Protocol::line("$PH,INIT,OK*");
         } else {
-            Serial.println("$ERR,PH,INIT_FAILED*");
+            Protocol::error("PH", "INIT_FAILED");
         }
-        currentState = STATE_IDLE;
+        setSystemState(STATE_IDLE);
     }
 
     void processPhMeasure() {
         uint32_t tempCount = APPBUFF_SIZE;
         if (AppPHCfg.PHInited == bFALSE || g_ispHMode == false) {
-            Serial.println("$ERR,PH,NOT_INITIALIZED*");
-            currentState = STATE_IDLE;
+            Protocol::error("PH", "NOT_INITIALIZED");
+            setSystemState(STATE_IDLE);
             return;
         }
-        if (AppPHISR(AppBuff, &tempCount) == 0) {
-            if (tempCount > 0) {
-                PHShowResult(AppBuff, tempCount);
-                Serial.printf("$PH,MEAS_DONE,%lu*\n", (unsigned long)tempCount);
-                currentState = STATE_IDLE;
-            }
+        if (AppPHISR(AppBuff, &tempCount) == 0 && tempCount > 0) {
+            PHShowResult(AppBuff, tempCount);
+            Protocol::linef("$PH,MEAS_DONE,%lu*", (unsigned long)tempCount);
+            setSystemState(STATE_IDLE);
+            return;
+        }
+        if (stateTimedOut(PH_MEASURE_TIMEOUT_MS)) {
+            Protocol::error("PH", "MEASURE_TIMEOUT");
+            setSystemState(STATE_IDLE);
         }
     }
 
     void processPhCalOffset() {
         uint32_t tempCount = APPBUFF_SIZE;
         if (AppPHCfg.PHInited == bFALSE || g_ispHMode == false) {
-            Serial.println("$ERR,PH,NOT_INITIALIZED*");
-            currentState = STATE_IDLE;
+            Protocol::error("PH", "NOT_INITIALIZED");
+            setSystemState(STATE_IDLE);
             return;
         }
-        if (AppPHISR(AppBuff, &tempCount) == 0) {
-            if (tempCount > 0) {
-                uint16_t measured_offset = AppBuff[0] & 0xFFFF;
-                AppPHCfg.ZeroOffset_Code = measured_offset;
-                savePhParams(measured_offset, AppPHCfg.Rtia_Value_Ohm);
-                Serial.printf("$PH,CAL_OFFSET,OK,%u*\n", (unsigned)measured_offset);
-                AppPHCfg.TswitchSel   = SWT_AIN1 | SWT_TRTIA;
-                AppPHCfg.bParaChanged  = bTRUE;
-                AppPHInit(AppBuff, APPBUFF_SIZE);
-                currentState = STATE_IDLE;
-            }
+        if (AppPHISR(AppBuff, &tempCount) == 0 && tempCount > 0) {
+            uint16_t measured_offset = AppBuff[0] & 0xFFFF;
+            AppPHCfg.ZeroOffset_Code = measured_offset;
+            savePhParams(measured_offset, AppPHCfg.Rtia_Value_Ohm);
+            Protocol::linef("$PH,CAL_OFFSET,OK,%u*", (unsigned)measured_offset);
+            AppPHCfg.TswitchSel   = SWT_AIN0 | SWT_TRTIA;
+            AppPHCfg.bParaChanged  = bTRUE;
+            AppPHInit(AppBuff, APPBUFF_SIZE);
+            setSystemState(STATE_IDLE);
+            return;
+        }
+        if (stateTimedOut(PH_CAL_TIMEOUT_MS)) {
+            Protocol::error("PH", "CAL_OFFSET_TIMEOUT");
+            setSystemState(STATE_IDLE);
         }
     }
 
     void processPhCalGain() {
         uint32_t tempCount = APPBUFF_SIZE;
-        if (AppPHCfg.PHInited == bFALSE || g_ispHMode == false) {
-            Serial.println("$ERR,PH,NOT_INITIALIZED*");
-            currentState = STATE_IDLE;
-            return;
+
+    if (AppPHCfg.PHInited == bFALSE || g_ispHMode == false) {
+        Protocol::error("PH", "NOT_INITIALIZED");
+        setSystemState(STATE_IDLE);
+        return;
+    }
+
+    if (AppPHISR(AppBuff, &tempCount) == 0 && tempCount > 0) {
+        uint32_t sum = 0;
+
+        for (uint32_t i = 0; i < tempCount; i++) {
+            sum += (AppBuff[i] & 0xFFFF);
         }
-        if (AppPHISR(AppBuff, &tempCount) == 0) {
-            if (tempCount > 0) {
-                uint16_t rawCode    = AppBuff[0] & 0xFFFF;
-                int32_t  diff_code  = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
-                float    voltage_diff = ((float)diff_code / 32768.0f) * 1.82f;
-                float    abs_volt     = fabs(voltage_diff);
-                if (abs_volt > 0.05f) {
-                    float calculated_rtia = (abs_volt * g_calResistorValue) / 1.1f;
-                    AppPHCfg.Rtia_Value_Ohm = calculated_rtia;
-                    savePhParams(AppPHCfg.ZeroOffset_Code, calculated_rtia);
-                    Serial.printf("$PH,CAL_GAIN,OK,%.2f,%.1f,%u,%.6f*\n",
-                                calculated_rtia, g_calResistorValue,
-                                (unsigned)rawCode, voltage_diff);
-                } else {
-                    Serial.printf("$ERR,PH,SIGNAL_LOW,%.6f*\n", abs_volt);
-                }
-                currentState = STATE_IDLE;
-            }
+
+        uint16_t rawCode = (uint16_t)(sum / tempCount);
+
+        int32_t diff_code = (int32_t)rawCode - (int32_t)AppPHCfg.ZeroOffset_Code;
+
+        const float ADC_REF_V       = 1.82f;
+        const float HSTIA_BIAS_V    = 1.1f;
+
+        float voltage_diff = ((float)diff_code / 32768.0f) * ADC_REF_V;
+        float abs_volt     = fabsf(voltage_diff);
+
+        // 保护 1：信号过小，通常对应 Rcal 未接入、TMUX 通道错误、AIN0 未接入 HSTIA
+        if (abs_volt < 0.05f) {
+            Protocol::linef(
+                "$ERR,PH,CAL_SIGNAL_LOW,%.6f,%u*",
+                abs_volt,
+                (unsigned)rawCode
+            );
         }
+        // 保护 2：信号过大，通常对应 Rcal 太小、HSTIA 输出接近饱和、offset 错误
+        else if (abs_volt > 1.20f) {
+            Protocol::linef(
+                "$ERR,PH,CAL_SIGNAL_HIGH,%.6f,%u*",
+                voltage_diff,
+                (unsigned)rawCode
+            );
+        }
+        else {
+            float calculated_rtia =
+                (abs_volt * g_calResistorValue) / HSTIA_BIAS_V;
+
+            AppPHCfg.Rtia_Value_Ohm = calculated_rtia;
+            savePhParams(AppPHCfg.ZeroOffset_Code, calculated_rtia);
+
+            Protocol::linef(
+                "$PH,CAL_GAIN,OK,%.2f,%.1f,%u,%.6f,%.6f*",
+                calculated_rtia,
+                g_calResistorValue,
+                (unsigned)rawCode,
+                voltage_diff,
+                abs_volt
+            );
+        }
+
+        // 校准后恢复 pH 测量路径：TMUX1109 channel 2 + AIN0
+        ChooseSenesingChannel(2);
+
+        AppPHCfg.DswitchSel   = SWD_OPEN;
+        AppPHCfg.PswitchSel   = SWP_PL | SWP_PL2;
+        AppPHCfg.NswitchSel   = SWN_OPEN;
+        AppPHCfg.TswitchSel   = SWT_AIN0 | SWT_TRTIA;
+        AppPHCfg.bParaChanged = bTRUE;
+        AppPHInit(AppBuff, APPBUFF_SIZE);
+
+        setSystemState(STATE_IDLE);
+        return;
+    }
+
+    if (stateTimedOut(PH_CAL_TIMEOUT_MS)) {
+        Protocol::error("PH", "CAL_GAIN_TIMEOUT");
+
+        ChooseSenesingChannel(2);
+        AppPHCfg.TswitchSel   = SWT_AIN0 | SWT_TRTIA;
+        AppPHCfg.bParaChanged = bTRUE;
+        AppPHInit(AppBuff, APPBUFF_SIZE);
+
+        setSystemState(STATE_IDLE);
+    }
     }
 
     void processPhChannel() {
     ChooseISFETChannel(g_isfetChannel);
-    Serial.printf("$PH,ISFET,OK,%d*\n", g_isfetChannel);
-    currentState = STATE_IDLE;
+    Protocol::linef("$PH,ISFET,OK,%d*", g_isfetChannel);
+    setSystemState(STATE_IDLE);
     }

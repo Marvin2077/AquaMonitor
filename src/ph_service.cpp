@@ -1,4 +1,5 @@
 ﻿#include "ph_service.h"
+#include "protocol_writer.h"
 #include "Arduino.h"
 
 AppPHCfg_Type AppPHCfg;
@@ -55,7 +56,7 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.DswitchSel = SWD_OPEN;
     AppPHCfg.PswitchSel = SWP_PL|SWP_PL2;
     AppPHCfg.NswitchSel = SWN_OPEN;
-    AppPHCfg.TswitchSel = SWT_AIN1 | SWT_TRTIA;
+    AppPHCfg.TswitchSel = SWT_AIN0 | SWT_TRTIA;
     //ADC Basic settings
     AppPHCfg.ADCMuxN = ADCMUXN_VSET1P1;
     AppPHCfg.ADCMuxP = ADCMUXP_HSTIA_P;
@@ -70,7 +71,7 @@ AD5940Err AppPHCfg_init()
     AppPHCfg.Sinc2NotchEnable = bTRUE;
     //Calibration
     AppPHCfg.ZeroOffset_Code = 32768; // 默认中点 (对应 0V)
-    AppPHCfg.Rtia_Value_Ohm = AppPHCfg.HstiaRtiaSel;
+    AppPHCfg.Rtia_Value_Ohm = 160000.0f;
     return AD5940ERR_OK;
 
 }
@@ -390,7 +391,7 @@ AD5940Err PHShowResult(uint32_t *pData, uint32_t DataCount)
         float current_uA = current_A * 1e6f; // 转换为微安
 
         // 5. 打印结果
-        Serial.printf("$PH,MEAS,%d,%lu,%u,%.6f,%.6f,%.2f,%u*\n",
+        Protocol::linef("$PH,MEAS,%d,%lu,%u,%.6f,%.6f,%.2f,%u*",
                       i + 1, (unsigned long)DataCount, (unsigned)rawCode,
                       voltage_diff, current_uA, RTIA_VAL, (unsigned)AppPHCfg.ZeroOffset_Code);
         

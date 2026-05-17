@@ -25,6 +25,8 @@ enum SystemState {
 };
 
 extern SystemState currentState;
+extern uint32_t g_stateEnteredMs;
+void setSystemState(SystemState nextState);
 
 // === ADS124S08 / 温度服务 ===
 extern ADS124S08_Drv* ads124s08;

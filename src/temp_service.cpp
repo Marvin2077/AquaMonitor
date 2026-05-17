@@ -44,7 +44,6 @@ bool TempService::fitThreePoint(const CalibPoint& p1,
   // 调用上面的数学工具解方程
   if (!solve3x3(A, Y, X)) 
   {
-    Serial.print("C");
     return false;
   }
   // 保存结果
@@ -195,13 +194,11 @@ bool TempService::finishCalibration()
       !temp_points_[1].recorded || 
       !temp_points_[2].recorded) {
       // 如果任何一个点没记录，或者数据不全
-      Serial.print("A");
       return false; 
   }
   // 如果三个点的测量值太接近，矩阵也会无解，需要拦截
   if (fabs(temp_points_[0].t_meas - temp_points_[1].t_meas) < 0.1 ||
       fabs(temp_points_[1].t_meas - temp_points_[2].t_meas) < 0.1) {
-      Serial.print("B");
       return false;
   }
   CalibCoeff new_coeffs;

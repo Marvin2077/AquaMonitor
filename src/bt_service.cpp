@@ -1,14 +1,16 @@
 #include "bt_service.h"
+#include "debug_log.h"
+#include "protocol_writer.h"
 
 BluetoothSerial SerialBT;
 
 void BTService_Init(const char* deviceName)
 {
     if(!SerialBT.begin(deviceName)) {
-        Serial.println("An error occurred initializing Bluetooth");
+        Protocol::error("BT", "INIT_FAILED");
     } else {
-        Serial.printf("Bluetooth initialized! Device Name: %s\n", deviceName);
-        Serial.println("You can now pair with it and use a Serial Terminal.");
+        LOG_DEBUG_PRINTF("Bluetooth initialized! Device Name: %s\n", deviceName);
+        LOG_DEBUG_PRINTLN("You can now pair with it and use a Serial Terminal.");
     }
 }
 
